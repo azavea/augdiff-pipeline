@@ -1,6 +1,6 @@
 lazy val commonSettings = Seq(
-  organization := "com.azavea",
-  version := "0.1",
+  organization := "osmdiff",
+  version := "0",
   cancelable in Global := true,
   scalaVersion in ThisBuild := "2.11.12",
   scalacOptions := Seq(
@@ -17,14 +17,26 @@ lazy val commonSettings = Seq(
     "-Ypartial-unification",
     "-Ypatmat-exhaust-depth", "100"
   ),
-  resolvers ++= Seq(),
+  resolvers ++= Seq(
+    "jcraft" at "https://mvnrepository.com/artifact/com.jcraft/jsch",
+    "jets3t" at "https://mvnrepository.com/artifact/net.java.dev.jets3t/jets3t"
+  ),
+  assemblyMergeStrategy in assembly := {
+    case s if s.startsWith("META-INF/services") => MergeStrategy.concat
+    case "reference.conf" | "application.conf"  => MergeStrategy.concat
+    case "META-INF/MANIFEST.MF" | "META-INF\\MANIFEST.MF" => MergeStrategy.discard
+    case "META-INF/ECLIPSEF.RSA" | "META-INF/ECLIPSEF.SF" => MergeStrategy.discard
+    case _ => MergeStrategy.first
+  },
   shellPrompt := { s => Project.extract(s).currentProject.id + " > " }
 )
 
-lazy val root = Project("osm-diff", file("."))
+lazy val root = (project in file("."))
+  .aggregate(indexer, ad)
   .settings(commonSettings: _*)
 
-lazy val ad =
-  project
-    .settings(commonSettings: _*)
-    .dependsOn(root)
+lazy val indexer = (project in file ("indexer"))
+  .settings(commonSettings: _*)
+
+lazy val ad = (project in file ("ad"))
+  .settings(commonSettings: _*)

@@ -1,4 +1,4 @@
-name := "ad"
+name := "indexer"
 
 libraryDependencies ++= Seq(
   "com.amazonaws"     % "aws-java-sdk" % "1.7.4",
@@ -8,13 +8,19 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-sql"    % "2.3.0" % "provided"
 )
 
+// libraryDependencies in console ++= Seq(
+//   "org.apache.spark" %% "spark-core" % "2.3.0",
+//   "org.apache.spark" %% "spark-hive" % "2.3.0",
+//   "org.apache.spark" %% "spark-sql"  % "2.3.0"
+// )
+
 // initialCommands in console :=
 //   """
-// import osmdiff.ad._
+// import osmdiff.indexer._
 // val spark = Indexer.sparkSession()
 //   """
 
-assemblyJarName in assembly := "ad.jar"
+assemblyJarName in assembly := "indexer.jar"
 
 fork in Test := false
 parallelExecution in Test := false

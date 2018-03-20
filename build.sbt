@@ -32,11 +32,16 @@ lazy val commonSettings = Seq(
 )
 
 lazy val root = (project in file("."))
-  .aggregate(indexer, ad)
+  .aggregate(common, indexer, ad)
+  .settings(commonSettings: _*)
+
+lazy val common = (project in file("common"))
   .settings(commonSettings: _*)
 
 lazy val indexer = (project in file ("indexer"))
+  .dependsOn(common)
   .settings(commonSettings: _*)
 
 lazy val ad = (project in file ("ad"))
+  .dependsOn(common)
   .settings(commonSettings: _*)

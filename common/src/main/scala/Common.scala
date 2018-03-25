@@ -1,4 +1,4 @@
-package osmdiff.common
+package osmdiff
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.functions.udf

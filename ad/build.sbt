@@ -7,6 +7,7 @@ libraryDependencies ++= Seq(
   "org.apache.spark"         %% "spark-core"   % "2.3.0" % "provided",
   "org.apache.spark"         %% "spark-hive"   % "2.3.0" % "provided",
   "org.apache.spark"         %% "spark-sql"    % "2.3.0" % "provided",
+  "org.openstreetmap.osmosis" % "osmosis-core" % "0.46",
   "org.openstreetmap.osmosis" % "osmosis-xml"  % "0.46"
 )
 

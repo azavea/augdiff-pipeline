@@ -17,10 +17,6 @@ lazy val commonSettings = Seq(
     "-Ypartial-unification",
     "-Ypatmat-exhaust-depth", "100"
   ),
-  resolvers ++= Seq(
-    "jcraft" at "https://mvnrepository.com/artifact/com.jcraft/jsch",
-    "jets3t" at "https://mvnrepository.com/artifact/net.java.dev.jets3t/jets3t"
-  ),
   assemblyMergeStrategy in assembly := {
     case s if s.startsWith("META-INF/services") => MergeStrategy.concat
     case "reference.conf" | "application.conf"  => MergeStrategy.concat

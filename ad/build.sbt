@@ -8,7 +8,8 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-hive"                 % "2.3.0" % "provided",
   "org.apache.spark" %% "spark-sql"                  % "2.3.0" % "provided",
   "org.apache.spark" %% "spark-streaming"            % "2.3.0" % "provided",
-  "org.apache.spark" %% "spark-streaming-kafka-0-10" % "2.3.0"
+  "org.apache.spark" %% "spark-streaming-kafka-0-10" % "2.3.0",
+  "org.rocksdb"       % "rocksdbjni"                 % "5.5.1"
 )
 
 assemblyJarName in assembly := "ad.jar"

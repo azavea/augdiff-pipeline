@@ -1,4 +1,4 @@
-package osmdiff.indexer
+package osmdiff
 
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark._
@@ -6,7 +6,7 @@ import org.apache.spark.rdd._
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
-import osmdiff.common.Common
+import org.rocksdb
 
 
 object Indexer {
@@ -15,47 +15,82 @@ object Indexer {
     val spark = Common.sparkSession("Indexer")
     import spark.implicits._
 
+    Logger.getLogger("org").setLevel(Level.ERROR)
+    Logger.getLogger("akka").setLevel(Level.ERROR)
+
     val osm = spark.read.orc(args(0))
     val nodeToWays = osm
       .filter(col("type") === "way")
-      .select(explode(col("nds.ref")).as("id"), col("timestamp").as("valid_from"), col("id").as("way_id"))
+      .select(
+        explode(col("nds.ref")).as("id"),
+        struct(
+          unix_timestamp(col("timestamp")).as("valid_from"),
+          col("id").as("ptr")
+        ).as("ptrs")
+    )
     val xToRelations = osm
       .filter(col("type") === "relation")
-      .select(explode(col("members")).as("id"), col("timestamp").as("valid_from"), col("id").as("relation_id"))
-    val wayToRelations = xToRelations
-      .filter(col("id.type") === "way")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
-    val relationToRelations  = xToRelations
-      .filter(col("id.type") === "relation")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
+      .select(
+        explode(col("members.ref")).as("id"),
+        struct(
+          unix_timestamp(col("timestamp")).as("valid_from"),
+          col("id").as("ptr")
+        ).as("ptrs")
+    )
+    val pointers = nodeToWays.union(xToRelations)
+      .groupBy(col("id"))
+      .agg(collect_list(col("ptrs")).as("ptrs"))
+    val joined =
+      osm.join(pointers, "id")
+        .withColumn("valid_from", unix_timestamp(col("timestamp")))
 
-    osm
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id").bucketBy(8, "id").partitionBy("type")
-      .saveAsTable("osm")
+    joined.printSchema
+    println(joined.count)
 
-    nodeToWays
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
-      .saveAsTable("node_to_ways")
+    joined
+      .rdd
+      .map({ row =>
+        val id = BigInt(row.getAs[Long]("id"))
+        val valid_from = BigInt(row.getAs[Long]("valid_from"))
+        val bigint = (id<<64) + valid_from
+        (bigint, row)
+      })
+      .sortBy(_._1)
+      .values
+      .mapPartitionsWithIndex({ (index: Int, rows: Iterator[Row]) =>
+        val eo = new org.rocksdb.EnvOptions
+        val o = new org.rocksdb.Options
+        val sst = new org.rocksdb.SstFileWriter(eo, o)
+        val bytes = Array[Byte](0, 0, 0, 0, 0, 0, 0, 0)
 
-    wayToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
-      .saveAsTable("way_to_relations")
+        sst.open(s"./sst/sst-${index}.dat")
+        rows.foreach({ row =>
+          val id = BigInt(row.getAs[Long]("id")).toByteArray
+          val valid_from = BigInt(row.getAs[Long]("valid_from")).toByteArray
+          val key: Array[Byte] = bytes.take(8-id.length) ++ id ++ bytes.take(8-valid_from.length) ++ valid_from
+          val value: Array[Byte] = {
+            val bos = new java.io.ByteArrayOutputStream
+            val oos = new java.io.ObjectOutputStream(bos)
 
-    relationToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
-      .saveAsTable("relation_to_relations")
+            try {
+              oos.writeObject(row)
+              oos.flush
+              val data = bos.toByteArray
+              data
+            }
+            finally {
+              bos.close
+            }
+          }
+          sst.add(
+            new org.rocksdb.Slice(key),
+            new org.rocksdb.Slice(value)
+          )
+        })
+        sst.finish
+        List(true).toIterator
+      })
+      .count
   }
 
 }

@@ -63,7 +63,7 @@ object Indexer {
         val sst = new org.rocksdb.SstFileWriter(eo, o)
         val bytes = Array[Byte](0, 0, 0, 0, 0, 0, 0, 0)
 
-        sst.open(s"./sst-${index}.dat")
+        sst.open(s"./sst/sst-${index}.dat")
         rows.foreach({ row =>
           val id = BigInt(row.getAs[Long]("id")).toByteArray
           val valid_from = BigInt(row.getAs[Long]("valid_from")).toByteArray

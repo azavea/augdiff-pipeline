@@ -45,6 +45,7 @@ object Indexer {
         .withColumn("valid_from", unix_timestamp(col("timestamp")))
 
     joined.printSchema
+    println(joined.count)
 
     joined
       .rdd
@@ -70,11 +71,16 @@ object Indexer {
           val value: Array[Byte] = {
             val bos = new java.io.ByteArrayOutputStream
             val oos = new java.io.ObjectOutputStream(bos)
-            oos.writeObject(row)
-            oos.flush
-            val data = bos.toByteArray
-            bos.close
-            data
+
+            try {
+              oos.writeObject(row)
+              oos.flush
+              val data = bos.toByteArray
+              data
+            }
+            finally {
+              bos.close
+            }
           }
           sst.add(
             new org.rocksdb.Slice(key),

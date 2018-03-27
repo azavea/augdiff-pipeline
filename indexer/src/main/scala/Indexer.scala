@@ -1,12 +1,10 @@
-package osmdiff.indexer
+package osmdiff
 
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark._
 import org.apache.spark.rdd._
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-
-import osmdiff.common.Common
 
 
 object Indexer {
@@ -18,10 +16,18 @@ object Indexer {
     val osm = spark.read.orc(args(0))
     val nodeToWays = osm
       .filter(col("type") === "way")
-      .select(explode(col("nds.ref")).as("id"), col("timestamp").as("valid_from"), col("id").as("way_id"))
+      .select(
+        explode(col("nds.ref")).as("id"),
+        unix_timestamp(col("timestamp")).as("valid_from"),
+        col("id").as("way_id")
+    )
     val xToRelations = osm
       .filter(col("type") === "relation")
-      .select(explode(col("members")).as("id"), col("timestamp").as("valid_from"), col("id").as("relation_id"))
+      .select(
+        explode(col("members")).as("id"),
+        unix_timestamp(col("timestamp")).as("valid_from"),
+        col("id").as("relation_id")
+    )
     val wayToRelations = xToRelations
       .filter(col("id.type") === "way")
       .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))

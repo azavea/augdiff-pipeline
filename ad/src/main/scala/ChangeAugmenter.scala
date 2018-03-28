@@ -2,9 +2,17 @@ package osmdiff
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
 
 import org.openstreetmap.osmosis.core.container.v0_6._
+import org.openstreetmap.osmosis.core.domain.v0_6._
+import org.openstreetmap.osmosis.core.domain.v0_6.EntityType
 import org.openstreetmap.osmosis.core.task.v0_6.ChangeSink
+import org.openstreetmap.osmosis.core.task.common.ChangeAction
+
+import scala.collection.mutable
+
+import java.sql.Timestamp
 
 
 object ChangeAugmenter {
@@ -14,7 +22,7 @@ object ChangeAugmenter {
     StructField("type", StringType, true),
     StructField("ref", LongType, true),
     StructField("role", StringType, true))))
-  val osmSchema = List(
+  val osmSchema = StructType(List(
     StructField("id", LongType, true),
     StructField("tags", MapType(StringType, StringType), true),
     StructField("lat", DecimalType(9, 7), true),
@@ -27,27 +35,72 @@ object ChangeAugmenter {
     StructField("user", StringType, true),
     StructField("version", LongType, true),
     StructField("visible", BooleanType, true),
-    StructField("type", StringType, true)
-  )
+    StructField("type", StringType, true)))
+
+  def entityToRow(entity: Entity, visible: Boolean): Row = {
+    val id: Long = entity.getId
+    val tags: Map[String,String] = entity.getTags.toArray.map({ tag =>
+      val t = tag.asInstanceOf[Tag]
+      (t.getKey -> t.getValue)
+    }).toMap
+    val changeset: Long = entity.getChangesetId
+    val timestamp: Timestamp = new Timestamp(entity.getTimestamp.getTime)
+    val uid: Long = entity.getUser.getId
+    val user: String = entity.getUser.getName
+    val version: Long = entity.getVersion
+    var lat: BigDecimal = null
+    var lon: BigDecimal = null
+    var nds: Array[Row] = null
+    var members: Array[Row] = null
+    var typeString: String = null
+
+    entity.getType match {
+      case EntityType.Node =>
+        val node = entity.asInstanceOf[Node]
+        typeString = new String("node")
+        lat = BigDecimal(node.getLatitude)
+        lon = BigDecimal(node.getLongitude)
+      case EntityType.Way =>
+        val way = entity.asInstanceOf[Way]
+        typeString = new String("way")
+        nds = way.getWayNodes.toArray.map({ wayNode => Row(wayNode.asInstanceOf[WayNode].getNodeId) })
+      case EntityType.Relation =>
+        val relation = entity.asInstanceOf[Relation]
+        typeString = new String("relation")
+        members = relation.getMembers.toArray.map({ relationMember =>
+          val rm = relationMember.asInstanceOf[RelationMember]
+          val typeString2 = rm.getMemberType match {
+            case EntityType.Node => new String("node")
+            case EntityType.Way => new String("way")
+            case EntityType.Relation => new String("relation")
+            case _ => throw new Exception
+          }
+          val ref = rm.getMemberId
+          val role = rm.getMemberRole
+          Row(typeString2, ref, role)
+        })
+      case _ => throw new Exception
+    }
+
+    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+  }
+
 }
 
 class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
-  var counter = 0L
+  import ChangeAugmenter._
+
+  val ab = mutable.ArrayBuffer.empty[Row]
 
   def process(ct: ChangeContainer): Unit = {
-    val action = ct.getAction
     val et = ct.getEntityContainer
 
-    counter=counter+1
-    if (et.getEntity.getId == 6197499L) {
-      et match {
-        case nc: NodeContainer => println(s"${nc.getEntity}")
-        case wc: WayContainer => println(s"${wc.getEntity}")
-        case rc: RelationContainer => println(s"${rc.getEntity}")
-        case _ => throw new Exception
-      }
-
+    ct.getAction match {
+      case ChangeAction.Create =>
+        ab.append(entityToRow(ct.getEntityContainer.getEntity, true))
+      case _ =>
     }
+
   }
 
   def initialize(m: java.util.Map[String,Object]): Unit = {
@@ -56,9 +109,21 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
 
   def complete(): Unit = {
     println("complete")
+
+    val df = spark.createDataFrame(
+      spark.sparkContext.parallelize(ab.toList),
+      StructType(osmSchema)
+    )
+
+    println(s"${df.count}")
+    spark.table("osm")
+      .union(df)
+      .printSchema
+    println(s"${df.head}")
   }
 
   def close(): Unit = {
     println("close")
   }
+
 }

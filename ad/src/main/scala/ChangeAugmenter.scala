@@ -96,7 +96,7 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     val et = ct.getEntityContainer
 
     ct.getAction match {
-      case ChangeAction.Create =>
+      case ChangeAction.Create | ChangeAction.Modify =>
         ab.append(entityToRow(ct.getEntityContainer.getEntity, true))
       case _ =>
     }

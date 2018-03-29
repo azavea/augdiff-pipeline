@@ -66,7 +66,7 @@ object AugmentedDiff {
 
   def main(args: Array[String]): Unit = {
 
-    val cr = new XmlChangeReader(new File(args(0)), false, CompressionMethod.None)
+    val cr = new XmlChangeReader(new File(args(0)), true, CompressionMethod.None)
     val ca = new ChangeAugmenter(spark)
     cr.setChangeSink(ca)
     cr.run

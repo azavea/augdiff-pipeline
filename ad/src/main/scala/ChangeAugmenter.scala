@@ -37,6 +37,28 @@ object ChangeAugmenter {
     StructField("visible", BooleanType, true),
     StructField("type", StringType, true)))
 
+  def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
+    val id: Long = entity.getId
+    val tags = Map.empty[String,String]
+    val changeset = null
+    val timestamp: Timestamp = new Timestamp(entity.getTimestamp.getTime)
+    val uid = null
+    val user = null
+    val version: Long = entity.getVersion
+    val lat = null
+    val lon = null
+    val nds = null
+    val members = null
+    val typeString: String = entity.getType match {
+      case EntityType.Node => "node"
+      case EntityType.Way => "way"
+      case EntityType.Relation => "relation"
+      case _ => throw new Exception
+    }
+
+    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+  }
+
   def entityToRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
     val tags: Map[String,String] = entity.getTags.toArray.map({ tag =>
@@ -57,22 +79,22 @@ object ChangeAugmenter {
     entity.getType match {
       case EntityType.Node =>
         val node = entity.asInstanceOf[Node]
-        typeString = new String("node")
+        typeString = "node"
         lat = BigDecimal(node.getLatitude)
         lon = BigDecimal(node.getLongitude)
       case EntityType.Way =>
         val way = entity.asInstanceOf[Way]
-        typeString = new String("way")
+        typeString = "way"
         nds = way.getWayNodes.toArray.map({ wayNode => Row(wayNode.asInstanceOf[WayNode].getNodeId) })
       case EntityType.Relation =>
         val relation = entity.asInstanceOf[Relation]
-        typeString = new String("relation")
+        typeString = "relation"
         members = relation.getMembers.toArray.map({ relationMember =>
           val rm = relationMember.asInstanceOf[RelationMember]
           val typeString2 = rm.getMemberType match {
-            case EntityType.Node => new String("node")
-            case EntityType.Way => new String("way")
-            case EntityType.Relation => new String("relation")
+            case EntityType.Node => "node"
+            case EntityType.Way => "way"
+            case EntityType.Relation => "relation"
             case _ => throw new Exception
           }
           val ref = rm.getMemberId
@@ -98,6 +120,8 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
         ab.append(entityToRow(ct.getEntityContainer.getEntity, true))
+      case ChangeAction.Delete =>
+        ab.append(entityToLesserRow(ct.getEntityContainer.getEntity, false))
       case _ =>
     }
 

@@ -28,6 +28,9 @@ object Indexer {
         unix_timestamp(col("timestamp")).as("valid_from"),
         col("id").as("relation_id")
     )
+    val nodeToRelations = xToRelations
+      .filter(col("id.type") === "node")
+      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
     val wayToRelations = xToRelations
       .filter(col("id.type") === "way")
       .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
@@ -41,21 +44,24 @@ object Indexer {
       .format("orc")
       .sortBy("id").bucketBy(8, "id").partitionBy("type")
       .saveAsTable("osm")
-
     nodeToWays
       .write
       .mode("overwrite")
       .format("orc")
       .sortBy("id", "valid_from").bucketBy(8, "id")
       .saveAsTable("node_to_ways")
-
+    nodeToRelations
+      .write
+      .mode("overwrite")
+      .format("orc")
+      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .saveAsTable("node_to_relations")
     wayToRelations
       .write
       .mode("overwrite")
       .format("orc")
       .sortBy("id", "valid_from").bucketBy(8, "id")
       .saveAsTable("way_to_relations")
-
     relationToRelations
       .write
       .mode("overwrite")

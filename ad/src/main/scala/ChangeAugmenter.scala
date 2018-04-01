@@ -163,6 +163,9 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
         unix_timestamp(col("timestamp")).as("valid_from"),
         col("id").as("relation_id")
     )
+    val nodeToRelations = xToRelations
+      .filter(col("id.type") === "node")
+      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
     val wayToRelations = xToRelations
       .filter(col("id.type") === "way")
       .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
@@ -182,6 +185,12 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .format("orc")
       .sortBy("id", "valid_from").bucketBy(8, "id")
       .saveAsTable("node_to_ways_updates")
+    nodeToRelations
+      .write
+      .mode("overwrite")
+      .format("orc")
+      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .saveAsTable("node_to_relations")
     wayToRelations
       .write
       .mode("overwrite")

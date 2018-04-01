@@ -9,8 +9,9 @@ object Common {
 
   def sparkSession(appName: String): SparkSession = {
     val conf = new SparkConf()
-      .setIfMissing("spark.master", "local[*]")
       .setAppName(appName)
+      .setIfMissing("spark.master", "local[*]")
+      .setIfMissing("spark.executor.heartbeatInterval", "30")
       .set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
       .set("spark.sql.hive.metastorePartitionPruning", "true")
       .set("spark.sql.orc.filterPushdown", "true")

@@ -22,20 +22,4 @@ object Common {
       .getOrCreate
   }
 
-  val farFuture = {
-    val c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-    c.set(java.util.Calendar.YEAR, 1900+0xff)
-    val ts = new java.sql.Timestamp(c.getTimeInMillis)
-    udf({ () => ts })
-  }
-
-  val idTimestamp = udf({ (id: Long, ts: java.sql.Timestamp) =>
-    val c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-    c.setTime(ts)
-    val year = c.get(java.util.Calendar.YEAR)-1900
-    val month = c.get(java.util.Calendar.MONTH)
-    val bits: Long = (id<<12) | ((0x000000ff & year)<<4) | (0x0000000f & month)
-    bits // 12 bits for date, 48 bits for node id
-  })
-
 }

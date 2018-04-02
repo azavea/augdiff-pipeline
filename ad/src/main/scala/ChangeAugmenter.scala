@@ -188,7 +188,7 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .mode("overwrite")
       .format("orc")
       .sortBy("id", "instant").bucketBy(8, "id")
-      .saveAsTable("node_to_relations")
+      .saveAsTable("node_to_relations_updates")
     wayToRelations
       .write
       .mode("overwrite")

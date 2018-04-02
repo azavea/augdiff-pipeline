@@ -47,8 +47,8 @@ object ChangeAugmenter {
     val version: Long = entity.getVersion
     val lat = null
     val lon = null
-    val nds = null
-    val members = null
+    val nds = Array.empty[Row]
+    val members = Array.empty[Row]
     val typeString: String = entity.getType match {
       case EntityType.Node => "node"
       case EntityType.Way => "way"
@@ -72,8 +72,8 @@ object ChangeAugmenter {
     val version: Long = entity.getVersion
     var lat: BigDecimal = null
     var lon: BigDecimal = null
-    var nds: Array[Row] = null
-    var members: Array[Row] = null
+    var nds: Array[Row] = Array.empty[Row]
+    var members: Array[Row] = Array.empty[Row]
     var typeString: String = null
 
     entity.getType match {
@@ -115,8 +115,6 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   val ab = mutable.ArrayBuffer.empty[Row]
 
   def process(ct: ChangeContainer): Unit = {
-    val et = ct.getEntityContainer
-
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
         ab.append(entityToRow(ct.getEntityContainer.getEntity, true))

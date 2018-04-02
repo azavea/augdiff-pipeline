@@ -22,4 +22,5 @@ object Common {
       .getOrCreate
   }
 
+  val getInstant = udf({ (ts: java.sql.Timestamp) => ts.getTime })
 }

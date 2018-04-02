@@ -35,7 +35,8 @@ object ChangeAugmenter {
     StructField("user", StringType, true),
     StructField("version", LongType, true),
     StructField("visible", BooleanType, true),
-    StructField("type", StringType, true)))
+    StructField("type", StringType, true),
+    StructField("instant", LongType, true)))
 
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
@@ -56,7 +57,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString, timestamp.getTime)
   }
 
   def entityToRow(entity: Entity, visible: Boolean): Row = {
@@ -104,7 +105,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString, timestamp.getTime)
   }
 
 }
@@ -137,69 +138,68 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       StructType(osmSchema)
     )
     val lastLive = osmUpdates
-      .groupBy(col("id"))
+      .groupBy(col("id"), col("type"))
       .agg(max(
         struct(
           col("timestamp"),
           col("visible"),
           col("nds"),
-          col("members"),
-          col("type"))
+          col("members"))
       ).as("stuff")) // XXX can modifications and deletions can occur at the same instant?
       .select(col("id"), col("stuff.*"))
     val nodeToWays = lastLive
       .filter(col("type") === "way")
       .select(
         explode(col("nds.ref")).as("id"),
-        unix_timestamp(col("timestamp")).as("valid_from"),
+        unix_timestamp(col("timestamp")).as("instant"),
         col("id").as("way_id")
     )
     val xToRelations = lastLive
       .filter(col("type") === "relation")
       .select(
         explode(col("members")).as("id"),
-        unix_timestamp(col("timestamp")).as("valid_from"),
+        unix_timestamp(col("timestamp")).as("instant"),
         col("id").as("relation_id")
     )
     val nodeToRelations = xToRelations
       .filter(col("id.type") === "node")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
+      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
     val wayToRelations = xToRelations
       .filter(col("id.type") === "way")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
+      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
     val relationToRelations  = xToRelations
       .filter(col("id.type") === "relation")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
+      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
 
     osmUpdates
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id").bucketBy(8, "id").partitionBy("type")
+      .sortBy("id", "instant").bucketBy(8, "id").partitionBy("type")
       .saveAsTable("osm_updates")
     nodeToWays
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(8, "id")
       .saveAsTable("node_to_ways_updates")
     nodeToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(8, "id")
       .saveAsTable("node_to_relations")
     wayToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(8, "id")
       .saveAsTable("way_to_relations_updates")
     relationToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(8, "id")
       .saveAsTable("relation_to_relations_updates")
   }
 

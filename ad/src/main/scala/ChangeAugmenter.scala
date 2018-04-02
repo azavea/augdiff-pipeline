@@ -6,7 +6,6 @@ import org.apache.spark.sql.types._
 
 import org.openstreetmap.osmosis.core.container.v0_6._
 import org.openstreetmap.osmosis.core.domain.v0_6._
-import org.openstreetmap.osmosis.core.domain.v0_6.EntityType
 import org.openstreetmap.osmosis.core.task.v0_6.ChangeSink
 import org.openstreetmap.osmosis.core.task.common.ChangeAction
 
@@ -174,31 +173,31 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id").partitionBy("type")
+      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
       .saveAsTable("osm_updates")
     nodeToWays
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("node_to_ways_updates")
     nodeToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("node_to_relations_updates")
     wayToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("way_to_relations_updates")
     relationToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("relation_to_relations_updates")
   }
 

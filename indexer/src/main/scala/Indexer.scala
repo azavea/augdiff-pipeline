@@ -43,31 +43,31 @@ object Indexer {
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id").partitionBy("type")
+      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
       .saveAsTable("osm")
     nodeToWays
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("node_to_ways")
     nodeToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("node_to_relations")
     wayToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("way_to_relations")
     relationToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("relation_to_relations")
   }
 

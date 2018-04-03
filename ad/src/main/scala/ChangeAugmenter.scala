@@ -151,14 +151,14 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .filter(col("type") === "way")
       .select(
         explode(col("nds.ref")).as("id"),
-        unix_timestamp(col("timestamp")).as("instant"),
+        Common.getInstant(col("timestamp")).as("instant"),
         col("id").as("way_id")
     )
     val xToRelations = lastLive
       .filter(col("type") === "relation")
       .select(
         explode(col("members")).as("id"),
-        unix_timestamp(col("timestamp")).as("instant"),
+        Common.getInstant(col("timestamp")).as("instant"),
         col("id").as("relation_id")
     )
     val nodeToRelations = xToRelations

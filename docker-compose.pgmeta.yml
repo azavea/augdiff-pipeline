@@ -1,0 +1,26 @@
+version: "3"
+
+services:
+  metastore-database:
+    image: postgres:10.3
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data/pgdata
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
+    ports:
+      - "5432:5432"
+  hive:
+    image: quay.io/azavea/hive:latest
+    command: schematool -dbType postgres -initSchema
+    build:
+      context: ./docker/hive
+      dockerfile: Dockerfile
+    depends_on:
+      - metastore-database
+    links:
+      - metastore-database:database
+
+

@@ -1,0 +1,9 @@
+version: '3'
+services:
+  osmium-tool:
+    image: jamesmcclain/osmium-tool
+    build:
+      context: docker/osmium-tool
+      dockerfile: Dockerfile
+    stdin_open: true
+    tty: true

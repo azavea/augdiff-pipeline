@@ -8,7 +8,13 @@ WORKDIR /tmp
 RUN curl -L http://apache.claz.org/hive/stable-2/apache-hive-2.3.3-bin.tar.gz --output apache-hive-2.3.3-bin.tar.gz
 RUN tar xf apache-hive-2.3.3-bin.tar.gz
 
+FROM openjdk:8 as spark-build
+WORKDIR /tmp
+RUN curl -L http://apache.claz.org/spark/spark-2.3.0/spark-2.3.0-bin-hadoop2.7.tgz --out spark-2.3.0-bin-hadoop2.7.tgz
+RUN tar xf spark-2.3.0-bin-hadoop2.7.tgz
+
 FROM openjdk:8
+# HADOOP
 ENV HADOOP_HOME=/opt/hadoop-2.8.3
 ENV HADOOP_CONF_DIR=${HADOOP_HOME}/etc/hadoop
 ENV HADOOP_MAPRED_HOME=${HADOOP_HOME}
@@ -26,18 +32,21 @@ COPY hadoop/hdfs-site.xml ${HADOOP_CONF_DIR}/hdfs-site.xml
 RUN mkdir -p /hdfs/data
 RUN mkdir -p /hdfs/name
 
+# HIVE
 ENV HIVE_HOME=/opt/apache-hive-2.3.3-bin
 ENV HIVE_CONF_DIR=${HIVE_HOME}/conf
 ENV PATH="${HIVE_HOME}/bin:${PATH}"
 COPY --from=hive-build /tmp/apache-hive-2.3.3-bin ${HIVE_HOME}
 COPY hive/hive-site.xml ${HIVE_CONF_DIR}/hive-site.xml
 
-
 RUN apt-get update
 RUN apt-get install -y libpostgresql-jdbc-java
 RUN apt-get clean
 RUN ln /usr/share/java/postgresql-jdbc4.jar ${HIVE_HOME}/lib/postgresql-jdbc4.jar
 
+# SPARK
+ENV SPARK_HOME=/opt/spark-2.3.0-bin-hadoop2.7
+COPY --from=spark-build /tmp/spark-2.3.0-bin-hadoop2.7 ${SPARK_HOME}
 
 COPY entrypoint.sh /opt/entrypoint.sh
 ENTRYPOINT [ "/opt/entrypoint.sh" ]

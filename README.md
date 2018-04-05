@@ -19,3 +19,36 @@ To apply change information, type something like
 ```bash
 $SPARK_HOME/bin/spark-submit --driver-memory 16G ~/local/src/ad/target/scala-2.11/ad.jar ./area_of_interest.osc
 ```
+
+## Postgres Metastore ##
+
+Successfully running the postgres metastore should be relatively
+pain-free with the help of `docker-compose`. First, we'll need to bring
+up a fresh image of postgres. In preparation for that, make sure
+`data/pgdata` is empty (this is where we'll mount our PG database to
+persist tables when the image is not running). Then, run
+```bash
+docker-compose up metastore-database
+```
+
+Once that's up, we'll need to set up the schemas to match Hive's
+expectations:
+```bash
+docker-compose up metastore-init
+```
+
+Upon successful provisioning of the database, the `metastore-init`
+container should shut itself down. To verify that the tables are ready
+for use, simply run
+```bash
+docker-compose up metastore-info
+```
+to print schema version information.
+
+To actually use Hive, Hadoop, and Spark in conjunction with the external
+metastore, simply run
+```bash
+docker-compose run hive bash
+```
+to bring up a terminal in an environment where spark's hive
+functionality will be configured to work against the external metastore

@@ -6,7 +6,6 @@ import org.apache.spark.sql.types._
 
 import org.openstreetmap.osmosis.core.container.v0_6._
 import org.openstreetmap.osmosis.core.domain.v0_6._
-import org.openstreetmap.osmosis.core.domain.v0_6.EntityType
 import org.openstreetmap.osmosis.core.task.v0_6.ChangeSink
 import org.openstreetmap.osmosis.core.task.common.ChangeAction
 
@@ -35,7 +34,8 @@ object ChangeAugmenter {
     StructField("user", StringType, true),
     StructField("version", LongType, true),
     StructField("visible", BooleanType, true),
-    StructField("type", StringType, true)))
+    StructField("type", StringType, true),
+    StructField("instant", LongType, true)))
 
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
@@ -47,8 +47,8 @@ object ChangeAugmenter {
     val version: Long = entity.getVersion
     val lat = null
     val lon = null
-    val nds = null
-    val members = null
+    val nds = Array.empty[Row]
+    val members = Array.empty[Row]
     val typeString: String = entity.getType match {
       case EntityType.Node => "node"
       case EntityType.Way => "way"
@@ -56,7 +56,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString, timestamp.getTime)
   }
 
   def entityToRow(entity: Entity, visible: Boolean): Row = {
@@ -72,8 +72,8 @@ object ChangeAugmenter {
     val version: Long = entity.getVersion
     var lat: BigDecimal = null
     var lon: BigDecimal = null
-    var nds: Array[Row] = null
-    var members: Array[Row] = null
+    var nds: Array[Row] = Array.empty[Row]
+    var members: Array[Row] = Array.empty[Row]
     var typeString: String = null
 
     entity.getType match {
@@ -104,7 +104,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString, timestamp.getTime)
   }
 
 }
@@ -115,8 +115,6 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   val ab = mutable.ArrayBuffer.empty[Row]
 
   def process(ct: ChangeContainer): Unit = {
-    val et = ct.getEntityContainer
-
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
         ab.append(entityToRow(ct.getEntityContainer.getEntity, true))
@@ -139,60 +137,67 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       StructType(osmSchema)
     )
     val lastLive = osmUpdates
-      .groupBy(col("id"))
+      .groupBy(col("id"), col("type"))
       .agg(max(
         struct(
           col("timestamp"),
           col("visible"),
           col("nds"),
-          col("members"),
-          col("type"))
+          col("members"))
       ).as("stuff")) // XXX can modifications and deletions can occur at the same instant?
       .select(col("id"), col("stuff.*"))
     val nodeToWays = lastLive
       .filter(col("type") === "way")
       .select(
         explode(col("nds.ref")).as("id"),
-        unix_timestamp(col("timestamp")).as("valid_from"),
-        col("id").as("way_id")
-    )
+        Common.getInstant(col("timestamp")).as("instant"),
+        col("id").as("way_id"))
+      .distinct
     val xToRelations = lastLive
       .filter(col("type") === "relation")
       .select(
         explode(col("members")).as("id"),
-        unix_timestamp(col("timestamp")).as("valid_from"),
-        col("id").as("relation_id")
-    )
+        Common.getInstant(col("timestamp")).as("instant"),
+        col("id").as("relation_id"))
+    val nodeToRelations = xToRelations
+      .filter(col("id.type") === "node")
+      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
     val wayToRelations = xToRelations
       .filter(col("id.type") === "way")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
+      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
     val relationToRelations  = xToRelations
       .filter(col("id.type") === "relation")
-      .select(col("id.ref").as("id"), col("valid_from"), col("relation_id"))
+      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
 
     osmUpdates
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id").bucketBy(8, "id").partitionBy("type")
+      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
       .saveAsTable("osm_updates")
     nodeToWays
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("node_to_ways_updates")
+    nodeToRelations
+      .write
+      .mode("overwrite")
+      .format("orc")
+      .sortBy("id", "instant").bucketBy(1, "id")
+      .saveAsTable("node_to_relations_updates")
     wayToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("way_to_relations_updates")
     relationToRelations
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "valid_from").bucketBy(8, "id")
+      .sortBy("id", "instant").bucketBy(1, "id")
       .saveAsTable("relation_to_relations_updates")
   }
 

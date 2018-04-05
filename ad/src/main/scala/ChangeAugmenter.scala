@@ -1,7 +1,8 @@
 package osmdiff
 
+import org.apache.spark.sql._
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 
 import org.openstreetmap.osmosis.core.container.v0_6._
@@ -132,20 +133,16 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   def complete(): Unit = {
     println("complete")
 
+    val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
+
     val osmUpdates = spark.createDataFrame(
       spark.sparkContext.parallelize(ab.toList),
       StructType(osmSchema)
     )
     val lastLive = osmUpdates
-      .groupBy(col("id"), col("type"))
-      .agg(max(
-        struct(
-          col("timestamp"),
-          col("visible"),
-          col("nds"),
-          col("members"))
-      ).as("stuff")) // XXX can modifications and deletions can occur at the same instant?
-      .select(col("id"), col("stuff.*"))
+      .withColumn("row_number", row_number().over(window))
+      .filter(col("row_number") === 1) // Most recent version of this id×type pair
+      .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
     val nodeToWays = lastLive
       .filter(col("type") === "way")
       .select(
@@ -173,7 +170,8 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
+      .sortBy("id", "instant").bucketBy(1, "id")
+      .partitionBy("type")
       .saveAsTable("osm_updates")
     nodeToWays
       .write

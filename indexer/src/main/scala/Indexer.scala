@@ -43,7 +43,8 @@ object Indexer {
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
+      .sortBy("id", "instant").bucketBy(1, "id")
+      .partitionBy("type")
       .saveAsTable("osm")
     nodeToWays
       .write

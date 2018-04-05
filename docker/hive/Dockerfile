@@ -29,6 +29,7 @@ ENV PATH="${HADOOP_HOME}/bin:${PATH}"
 COPY --from=hadoop-build /tmp/hadoop-2.8.3 ${HADOOP_HOME}
 COPY hadoop/core-site.xml ${HADOOP_CONF_DIR}/core-site.xml
 COPY hadoop/hdfs-site.xml ${HADOOP_CONF_DIR}/hdfs-site.xml
+COPY hadoop/start-hdfs.sh /opt/start-hdfs.sh
 RUN mkdir -p /hdfs/data
 RUN mkdir -p /hdfs/name
 
@@ -46,8 +47,9 @@ RUN ln /usr/share/java/postgresql-jdbc4.jar ${HIVE_HOME}/lib/postgresql-jdbc4.ja
 
 # SPARK
 ENV SPARK_HOME=/opt/spark-2.3.0-bin-hadoop2.7
+ENV SPARK_CONF_DIR=/opt/spark-2.3.0-bin-hadoop2.7/conf
+ENV PATH="${SPARK_HOME}/bin:${PATH}"
 COPY --from=spark-build /tmp/spark-2.3.0-bin-hadoop2.7 ${SPARK_HOME}
+COPY hive/hive-site.xml ${SPARK_CONF_DIR}/hive-site.xml
 
-COPY entrypoint.sh /opt/entrypoint.sh
-ENTRYPOINT [ "/opt/entrypoint.sh" ]
 

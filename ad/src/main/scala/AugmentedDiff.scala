@@ -89,47 +89,6 @@ object AugmentedDiff {
     (touchedWays.collect, touchedRelations.collect)
   }
 
-  // private def recurseNode(nodeId: Long) = {
-  //   var keepGoing = true
-  //   val relations = mutable.Set.empty[Long]
-
-  //   val ways = nodeToWays
-  //     .filter(col("id") === nodeId)
-  //     .map({ r => r.getAs[Long]("way_id") })
-  //     .collect
-  //     .toSet
-
-  //   relations ++=
-  //   (if (ways.isEmpty)
-  //     Set.empty[Long]
-  //   else {
-  //     wayToRelations
-  //       .filter(col("id").isin(ways.toSeq:_*))
-  //       .map({ r => r.getAs[Long]("relation_id") })
-  //       .collect
-  //       .toSet
-  //   })
-
-  //   while (keepGoing) {
-  //     keepGoing = false
-  //     val newRelations =
-  //       if (relations.isEmpty) Set.empty[Long]
-  //       else {
-  //         relationToRelations
-  //           .filter(col("id").isin(relations.toSeq:_*))
-  //           .map({ r => r.getAs[Long]("relation_id") })
-  //           .collect
-  //           .toSet
-  //       }
-  //     if (!newRelations.subsetOf(relations)) {
-  //       keepGoing = true
-  //       relations ++= newRelations
-  //     }
-  //   }
-
-  //   (ways, relations)
-  // }
-
   def main(args: Array[String]): Unit = {
 
     Logger.getLogger("org").setLevel(Level.ERROR)

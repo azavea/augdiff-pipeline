@@ -34,8 +34,12 @@ docker-compose up metastore-database
 Once that's up, we'll need to set up the schemas to match Hive's
 expectations:
 ```bash
+docker-compose build
 docker-compose up metastore-init
 ```
+
+The purpose of the `docker-compose build` line above is to build the `hive` image from-which the metastore initialization takes place.
+If the `hive` image already exists, then that line can be safely omitted.
 
 Upon successful provisioning of the database, the `metastore-init`
 container should shut itself down. To verify that the tables are ready
@@ -45,6 +49,17 @@ docker-compose up metastore-info
 ```
 to print schema version information.
 
+Next, type
+```bash
+docker-compose exec metastore-database bash -c 'echo "ALTER TABLE \"TBLS\" ALTER COLUMN \"IS_REWRITE_ENABLED\" DROP NOT NULL;" | psql -d metastore -U hive'
+```
+to apply a work-around to the postgres database.
+The statement
+```sql
+ALTER TABLE "TBLS" ALTER COLUMN "IS_REWRITE_ENABLED" DROP NOT NULL;
+```
+makes the schema of the table `TBLS` compatible with the version of hive that is packaged with Spark 2.3.
+
 To actually use Hive, Hadoop, and Spark in conjunction with the external
 metastore, simply run
 ```bash
@@ -52,3 +67,10 @@ docker-compose run hive bash
 ```
 to bring up a terminal in an environment where spark's hive
 functionality will be configured to work against the external metastore
+
+From inside of the container, hive can be interacted with by e.g. typing
+```bash
+/opt/start-hdfs.sh
+spark-shell --conf spark.sql.warehouse.dir=file:///tmp --conf spark.hadoop.hive.metastore.warehouse.dir=file:///tmp --conf spark.jars=file:///usr/share/java/postgresql-jdbc4.jar
+```
+where the first line starts HDFS and the second line starts a `spark-shell` capabile of interacting with hive.

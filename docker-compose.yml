@@ -30,6 +30,16 @@ services:
     command: bash -c "/opt/start-hdfs.sh && schematool -dbType postgres -initSchema"
     links:
       - metastore-database:database
+  metastore-workaround:
+    image: postgres:10.3
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data/pgdata
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
+    command: bash -c 'echo "ALTER TABLE "TBLS" ALTER COLUMN "IS_REWRITE_ENABLED" DROP NOT NULL;" | psql -d metastore -U hive'
   metastore-info:
     image: quay.io/azavea/hive:latest
     command: bash -c "/opt/start-hdfs.sh ; schematool -dbType postgres -info"

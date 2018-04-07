@@ -1,0 +1,37 @@
+version: '3'
+services:
+  osmium-tool:
+    image: jamesmcclain/osmium-tool
+    build:
+      context: docker/osmium-tool
+      dockerfile: Dockerfile
+    stdin_open: true
+    tty: true
+  metastore-database:
+    image: postgres:10.3
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data/pgdata
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
+    ports:
+      - "5432:5432"
+  hive:
+    image: quay.io/azavea/hive:latest
+    build:
+      context: ./docker/hive
+      dockerfile: Dockerfile
+    links:
+      - metastore-database:database
+  metastore-init:
+    image: quay.io/azavea/hive:latest
+    command: bash -c "/opt/start-hdfs.sh && schematool -dbType postgres -initSchema"
+    links:
+      - metastore-database:database
+  metastore-info:
+    image: quay.io/azavea/hive:latest
+    command: bash -c "/opt/start-hdfs.sh ; schematool -dbType postgres -info"
+    links:
+      - metastore-database:database

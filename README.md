@@ -34,8 +34,12 @@ docker-compose up metastore-database
 Once that's up, we'll need to set up the schemas to match Hive's
 expectations:
 ```bash
+docker-compose build
 docker-compose up metastore-init
 ```
+
+The purpose of the `docker-compose build` line above is to build the `hive` image from-which the metastore initialization takes place.
+If the `hive` image already exists, then that line can be safely omitted.
 
 Upon successful provisioning of the database, the `metastore-init`
 container should shut itself down. To verify that the tables are ready
@@ -44,6 +48,18 @@ for use, simply run
 docker-compose up metastore-info
 ```
 to print schema version information.
+
+Next, type
+```bash
+docker-compose metastore-workaround
+```
+to apply a work-around to the postgres database.
+That command executes the statement
+```sql
+ALTER TABLE "TBLS" ALTER COLUMN "IS_REWRITE_ENABLED" DROP NOT NULL;
+```
+in the postgres container.
+That command makes the schema of the table `TBLS` compatible with the version of hive that is packaged with Spark 2.3.
 
 To actually use Hive, Hadoop, and Spark in conjunction with the external
 metastore, simply run

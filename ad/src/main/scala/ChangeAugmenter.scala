@@ -162,18 +162,17 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .withColumn("from_type", col("from.type"))
       .drop("from")
 
-    osmUpdates
+    osmUpdates.repartition(16)
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "timestamp").bucketBy(1, "id")
-      .partitionBy("type")
+      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
       .saveAsTable("osm_updates")
-    nodeToWays.union(xToRelations)
+    nodeToWays.union(xToRelations).repartition(16)
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id")
+      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id", "from_type")
       .saveAsTable("index_updates")
   }
 

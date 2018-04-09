@@ -39,14 +39,13 @@ object Indexer {
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "timestamp").bucketBy(1, "id")
-      .partitionBy("type")
+      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
       .saveAsTable("osm")
     nodeToWays.union(xToRelations)
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id")
+      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id", "from_type")
       .saveAsTable("index")
   }
 

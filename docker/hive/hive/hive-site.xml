@@ -45,7 +45,7 @@
 
   <property>
     <name>hive.metastore.warehouse.dir</name>
-    <value>/tmp/test</value>
+    <value>file:///warehouse</value>
     <description>location of default database for the warehouse</description>
   </property>
 

@@ -39,7 +39,7 @@ object AugmentedDiff {
         touched,
         ((col("id") === col("to_id")) &&
          (col("type") === col("to_type")) &&
-         (Common.getInstant(col("timestamp")) < col("instant"))),
+         (col("instant") <= Common.getInstant(col("timestamp")))), // XXX backwards?
         "left_semi")
       .withColumn("row_number", row_number().over(window2))
       .filter(col("row_number") === 1)

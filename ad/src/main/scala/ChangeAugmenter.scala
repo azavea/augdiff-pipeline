@@ -24,6 +24,7 @@ object ChangeAugmenter {
     StructField("role", StringType, true))))
   val osmSchema = StructType(List(
     StructField("id", LongType, true),
+    StructField("type", StringType, true),
     StructField("tags", MapType(StringType, StringType), true),
     StructField("lat", DecimalType(9, 7), true),
     StructField("lon", DecimalType(10, 7), true),
@@ -34,8 +35,7 @@ object ChangeAugmenter {
     StructField("uid", LongType, true),
     StructField("user", StringType, true),
     StructField("version", LongType, true),
-    StructField("visible", BooleanType, true),
-    StructField("type", StringType, true)))
+    StructField("visible", BooleanType, true)))
 
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
@@ -56,7 +56,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
   }
 
   def entityToRow(entity: Entity, visible: Boolean): Row = {
@@ -104,7 +104,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString)
+    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
   }
 
 }
@@ -134,43 +134,24 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
 
     val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
-    val osmUpdates = spark.createDataFrame(
+    val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(ab.toList),
-      StructType(osmSchema)
-    )
-    val lastLive = osmUpdates
+      StructType(osmSchema))
+    val lastLive = osm
       .withColumn("row_number", row_number().over(window))
       .filter(col("row_number") === 1) // Most recent version of this id×type pair
       .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
-    val nodeToWays = lastLive
-      .filter(col("type") === "way")
-      .select(
-        explode(col("nds.ref")).as("from_id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("to_id"),
-        col("type").as("to_type"))
-      .withColumn("from_type", lit("node"))
-    .distinct
-    val xToRelations = lastLive
-      .filter(col("type") === "relation")
-      .select(
-        explode(col("members")).as("from"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("to_id"),
-        col("type").as("to_type"))
-      .withColumn("from_id", col("from.ref"))
-      .withColumn("from_type", col("from.type"))
-      .drop("from")
+    val index = Common.transitiveClosure(osm, Some(spark.table("index")))
 
-    osmUpdates.repartition(16)
+    osm.repartition(1)
       .write
-      .mode("overwrite")
+      .mode("overwrite") // XXX append
       .format("orc")
       .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
       .saveAsTable("osm_updates")
-    nodeToWays.union(xToRelations).repartition(16)
+    index.repartition(1)
       .write
-      .mode("overwrite")
+      .mode("overwrite") // XXX append
       .format("orc")
       .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id", "from_type")
       .saveAsTable("index_updates")

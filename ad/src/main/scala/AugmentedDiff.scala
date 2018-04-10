@@ -20,26 +20,26 @@ object AugmentedDiff {
   val spark = Common.sparkSession("Augmented Diff")
   import spark.implicits._
 
-  val window1 = Window.partitionBy("from_id", "from_type").orderBy(desc("instant"))
+  val window1 = Window.partitionBy("prior_id", "prior_type").orderBy(desc("instant"))
   val window2 = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
   def augment(rows: DataFrame) = {
     val touched = spark.table("index").union(spark.table("index_updates"))
       .join(
         rows,
-        ((col("from_id") === col("id")) &&
-         (col("from_type") === col("type"))),
+        ((col("prior_id") === col("id")) &&
+         (col("prior_type") === col("type"))),
         "left_semi")
       .withColumn("row_number", row_number().over(window1))
       .filter(col("row_number") === 1)
-      .select(col("to_id"), col("to_type"), col("instant"))
+      .select(col("dependent_id"), col("dependent_type"), col("instant"))
       .distinct
 
     spark.table("osm").union(spark.table("osm_updates"))
       .join(
         touched,
-        ((col("id") === col("to_id")) &&
-         (col("type") === col("to_type")) &&
+        ((col("id") === col("dependent_id")) &&
+         (col("type") === col("dependent_type")) &&
          (col("instant") <= Common.getInstant(col("timestamp")))),
         "left_semi")
       .withColumn("row_number", row_number().over(window2))
@@ -50,8 +50,7 @@ object AugmentedDiff {
 
   def main(args: Array[String]): Unit = {
 
-    Logger.getLogger("org").setLevel(Level.ERROR)
-    Logger.getLogger("akka").setLevel(Level.ERROR)
+    Common.denoise
 
     if (args(0) != "xxx") {
       val cr = new XmlChangeReader(new File(args(0)), true, CompressionMethod.None)

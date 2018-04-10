@@ -27,7 +27,8 @@ object AugmentedDiff {
     val touched = spark.table("index").union(spark.table("index_updates"))
       .join(
         rows,
-        (col("from_id") === col("id")) && (col("from_type") === col("type")),
+        ((col("from_id") === col("id")) &&
+         (col("from_type") === col("type"))),
         "left_semi")
       .withColumn("row_number", row_number().over(window1))
       .filter(col("row_number") === 1)
@@ -39,7 +40,7 @@ object AugmentedDiff {
         touched,
         ((col("id") === col("to_id")) &&
          (col("type") === col("to_type")) &&
-         (col("instant") <= Common.getInstant(col("timestamp")))), // XXX backwards?
+         (col("instant") <= Common.getInstant(col("timestamp")))),
         "left_semi")
       .withColumn("row_number", row_number().over(window2))
       .filter(col("row_number") === 1)
@@ -59,12 +60,8 @@ object AugmentedDiff {
       cr.run
     }
     else {
-      val sampleRate =
-        if (args.length > 1) args(1).toDouble
-        else 0.05
-      val updates = spark.table("osm_updates").sample(sampleRate)
+      val updates = spark.table("osm_updates")
       println(s"updates: ${updates.count}")
-
       val time1 = System.currentTimeMillis
       println(s"size: ${augment(updates)}")
       val time2 = System.currentTimeMillis

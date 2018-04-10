@@ -133,7 +133,6 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     println("complete")
 
     val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
-
     val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(ab.toList),
       StructType(osmSchema))
@@ -143,18 +142,8 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
     val index = Common.transitiveClosure(osm, Some(spark.table("index")))
 
-    osm.repartition(1)
-      .write
-      .mode("overwrite") // XXX append
-      .format("orc")
-      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
-      .saveAsTable("osm_updates")
-    index.repartition(1)
-      .write
-      .mode("overwrite") // XXX append
-      .format("orc")
-      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id", "from_type")
-      .saveAsTable("index_updates")
+    Common.saveBulk(osm.repartition(1), "osm_updates", "overwrite")
+    Common.saveIndex(index.repartition(1), "index_updates", "append")
   }
 
   def close(): Unit = {

@@ -13,62 +13,24 @@ object Indexer {
     val spark = Common.sparkSession("Indexer")
     import spark.implicits._
 
-    val osm = spark.read.orc(args(0))
-      .withColumn("instant", Common.getInstant(col("timestamp")))
+    Logger.getLogger("org").setLevel(Level.ERROR)
+    Logger.getLogger("akka").setLevel(Level.ERROR)
 
-    val nodeToWays = osm
-      .filter(col("type") === "way")
-      .select(
-        explode(col("nds.ref")).as("id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("way_id"))
-      .distinct
-    val xToRelations = osm
-      .filter(col("type") === "relation")
-      .select(
-        explode(col("members")).as("id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("relation_id"))
-    val nodeToRelations = xToRelations
-      .filter(col("id.type") === "node")
-      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
-    val wayToRelations = xToRelations
-      .filter(col("id.type") === "way")
-      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
-    val relationToRelations  = xToRelations
-      .filter(col("id.type") === "relation")
-      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
+    val osm = spark.read.orc(args(0))
+    val index = Common.transitiveClosure(osm, None)
 
     osm
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
+      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
       .saveAsTable("osm")
-    nodeToWays
+    index
       .write
       .mode("overwrite")
       .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("node_to_ways")
-    nodeToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("node_to_relations")
-    wayToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("way_to_relations")
-    relationToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("relation_to_relations")
+      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id", "from_type")
+      .saveAsTable("index")
   }
 
 }

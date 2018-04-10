@@ -1,7 +1,8 @@
 package osmdiff
 
+import org.apache.spark.sql._
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 
 import org.openstreetmap.osmosis.core.container.v0_6._
@@ -23,6 +24,7 @@ object ChangeAugmenter {
     StructField("role", StringType, true))))
   val osmSchema = StructType(List(
     StructField("id", LongType, true),
+    StructField("type", StringType, true),
     StructField("tags", MapType(StringType, StringType), true),
     StructField("lat", DecimalType(9, 7), true),
     StructField("lon", DecimalType(10, 7), true),
@@ -33,9 +35,7 @@ object ChangeAugmenter {
     StructField("uid", LongType, true),
     StructField("user", StringType, true),
     StructField("version", LongType, true),
-    StructField("visible", BooleanType, true),
-    StructField("type", StringType, true),
-    StructField("instant", LongType, true)))
+    StructField("visible", BooleanType, true)))
 
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
@@ -56,7 +56,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString, timestamp.getTime)
+    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
   }
 
   def entityToRow(entity: Entity, visible: Boolean): Row = {
@@ -104,7 +104,7 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    Row(id, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, typeString, timestamp.getTime)
+    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
   }
 
 }
@@ -132,73 +132,29 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   def complete(): Unit = {
     println("complete")
 
-    val osmUpdates = spark.createDataFrame(
-      spark.sparkContext.parallelize(ab.toList),
-      StructType(osmSchema)
-    )
-    val lastLive = osmUpdates
-      .groupBy(col("id"), col("type"))
-      .agg(max(
-        struct(
-          col("timestamp"),
-          col("visible"),
-          col("nds"),
-          col("members"))
-      ).as("stuff")) // XXX can modifications and deletions can occur at the same instant?
-      .select(col("id"), col("stuff.*"))
-    val nodeToWays = lastLive
-      .filter(col("type") === "way")
-      .select(
-        explode(col("nds.ref")).as("id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("way_id"))
-      .distinct
-    val xToRelations = lastLive
-      .filter(col("type") === "relation")
-      .select(
-        explode(col("members")).as("id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("relation_id"))
-    val nodeToRelations = xToRelations
-      .filter(col("id.type") === "node")
-      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
-    val wayToRelations = xToRelations
-      .filter(col("id.type") === "way")
-      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
-    val relationToRelations  = xToRelations
-      .filter(col("id.type") === "relation")
-      .select(col("id.ref").as("id"), col("instant"), col("relation_id"))
+    val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
-    osmUpdates
+    val osm = spark.createDataFrame(
+      spark.sparkContext.parallelize(ab.toList),
+      StructType(osmSchema))
+    val lastLive = osm
+      .withColumn("row_number", row_number().over(window))
+      .filter(col("row_number") === 1) // Most recent version of this id×type pair
+      .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
+    val index = Common.transitiveClosure(osm, Some(spark.table("index")))
+
+    osm.repartition(1)
       .write
-      .mode("overwrite")
+      .mode("overwrite") // XXX append
       .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id").partitionBy("type")
+      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
       .saveAsTable("osm_updates")
-    nodeToWays
+    index.repartition(1)
       .write
-      .mode("overwrite")
+      .mode("overwrite") // XXX append
       .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("node_to_ways_updates")
-    nodeToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("node_to_relations_updates")
-    wayToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("way_to_relations_updates")
-    relationToRelations
-      .write
-      .mode("overwrite")
-      .format("orc")
-      .sortBy("id", "instant").bucketBy(1, "id")
-      .saveAsTable("relation_to_relations_updates")
+      .sortBy("from_id", "from_type", "instant").bucketBy(1, "from_id", "from_type")
+      .saveAsTable("index_updates")
   }
 
   def close(): Unit = {

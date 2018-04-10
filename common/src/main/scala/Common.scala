@@ -50,30 +50,20 @@ object Common {
       .drop("from")
 
     // Compute transitive chains
-    var index = nodeToWays.union(xToRelations).distinct
+    val indexUpdates = nodeToWays.union(xToRelations).distinct
+    var index: DataFrame = existingIndex match {
+      case Some(existingIndex) => existingIndex.union(indexUpdates)
+      case None => indexUpdates
+    }
     var keepGoing = true
     do {
-      val joined = existingIndex match {
-        case Some(existingIndex) => {
-          index.union(existingIndex).as("left")
-            .join(
-              index.as("right"),
-              ((col("left.to_id") === col("right.from_id")) &&
-               (col("left.to_type") === col("right.from_type")) &&
-               (col("left.instant") <= col("right.instant"))), // XXX backwards?
-              "inner")
-        }
-        case None => {
-          index.as("left")
-            .join(
-              index.as("right"),
-              ((col("left.to_id") === col("right.from_id")) &&
-               (col("left.to_type") === col("right.from_type")) &&
-               (col("left.instant") <= col("right.instant"))), // XXX
-              "inner")
-        }
-      }
-      val additions = joined
+      val additions = index.as("left") // somewhat overkill
+        .join(
+          indexUpdates.as("right"),
+          ((col("left.to_id") === col("right.from_id")) &&
+           (col("left.to_type") === col("right.from_type")) &&
+           (col("left.instant") <= col("right.instant"))),
+          "inner")
         .select(
           col("left.from_id").as("from_id"),
           col("left.from_type").as("from_type"),

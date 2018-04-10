@@ -80,8 +80,8 @@ object Common {
       .drop("prior")
 
     // Compute transitive chains
-    val indexUpdates = nodeToWays.union(xToRelations).distinct
-    var index: DataFrame = existingIndex match {
+    var indexUpdates = nodeToWays.union(xToRelations).distinct // XXX
+    val index: DataFrame = existingIndex match {
       case Some(existingIndex) => existingIndex.union(indexUpdates)
       case None => indexUpdates
     }
@@ -100,13 +100,13 @@ object Common {
           col("right.dependent_id").as("dependent_id"),
           col("right.dependent_type").as("dependent_type"),
           col("right.instant").as("instant"))
-      index = index.union(additions).distinct
+      indexUpdates = indexUpdates.union(additions).distinct // XXX
       keepGoing = !additions.rdd.isEmpty
       logger.info("transitive closure iteration")
     } while(keepGoing)
 
     // Return index
-    index
+    indexUpdates
   }
 
 }

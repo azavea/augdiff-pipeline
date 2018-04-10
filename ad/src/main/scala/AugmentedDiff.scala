@@ -24,7 +24,7 @@ object AugmentedDiff {
   val window2 = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
   def augment(rows: DataFrame) = {
-    val touched = spark.table("index").union(spark.table("index_updates"))
+    val dependents = spark.table("index").union(spark.table("index_updates"))
       .join(
         rows,
         ((col("prior_id") === col("id")) &&
@@ -32,20 +32,28 @@ object AugmentedDiff {
         "left_semi")
       .withColumn("row_number", row_number().over(window1))
       .filter(col("row_number") === 1)
-      .select(col("dependent_id"), col("dependent_type"), col("instant"))
+      .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
       .distinct
-
-    spark.table("osm").union(spark.table("osm_updates"))
+    val priors = spark.table("index").union(spark.table("index_updates")).as("left")
       .join(
-        touched,
-        ((col("id") === col("dependent_id")) &&
-         (col("type") === col("dependent_type")) &&
-         (col("instant") <= Common.getInstant(col("timestamp")))),
+        dependents.as("right"),
+        ((col("left.dependent_id") === col("right.id")) &&
+         (col("left.dependent_type") === col("right.type"))),
+        "left_semi")
+      .withColumn("row_number", row_number().over(window1))
+      .filter(col("row_number") === 1)
+      .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
+      .distinct
+    spark.table("osm").union(spark.table("osm_updates")).as("left")
+      .join(
+        dependents.union(priors).as("right"),
+        ((col("left.id") === col("right.id")) &&
+         (col("left.type") === col("right.type")) &&
+         Common.getInstant(col("left.timestamp")) >= (col("right.instant"))),
         "left_semi")
       .withColumn("row_number", row_number().over(window2))
       .filter(col("row_number") === 1)
       .drop("row_number")
-      .count
   }
 
   def main(args: Array[String]): Unit = {
@@ -62,9 +70,9 @@ object AugmentedDiff {
       val updates = spark.table("osm_updates")
       println(s"updates: ${updates.count}")
       val time1 = System.currentTimeMillis
-      println(s"size: ${augment(updates)}")
+      println(s"size: ${augment(updates).count}")
       val time2 = System.currentTimeMillis
-      println(s"size: ${augment(updates)}")
+      println(s"size: ${augment(updates).count}")
       val time3 = System.currentTimeMillis
       println(s"times: ${time2 - time1} ${time3 - time2}")
     }

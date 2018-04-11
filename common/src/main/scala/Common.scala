@@ -5,6 +5,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.types._
 
 
 object Common {
@@ -28,6 +29,48 @@ object Common {
   }
 
   val getInstant = udf({ (ts: java.sql.Timestamp) => ts.getTime })
+
+  val ndsSchema = ArrayType(StructType(List(StructField("ref", LongType, true))))
+  val membersSchema = ArrayType(StructType(List(
+    StructField("type", StringType, true),
+    StructField("ref", LongType, true),
+    StructField("role", StringType, true))))
+  val osmSchema = StructType(List(
+    StructField("id", LongType, true),
+    StructField("type", StringType, true),
+    StructField("tags", MapType(StringType, StringType), true),
+    StructField("lat", DecimalType(9, 7), true),
+    StructField("lon", DecimalType(10, 7), true),
+    StructField("nds", ndsSchema, true),
+    StructField("members", membersSchema, true),
+    StructField("changeset", LongType, true),
+    StructField("timestamp", TimestampType, true),
+    StructField("uid", LongType, true),
+    StructField("user", StringType, true),
+    StructField("version", LongType, true),
+    StructField("visible", BooleanType, true)))
+
+  val osmColumns: List[Column] = List(
+    col("id"),
+    col("type"),
+    col("tags"),
+    col("lat"),
+    col("lon"),
+    col("nds"),
+    col("members"),
+    col("changeset"),
+    col("timestamp"),
+    col("uid"),
+    col("user"),
+    col("version"),
+    col("visible"))
+
+  val indexColumns: List[Column] = List(
+    col("prior_id"),
+    col("prior_type"),
+    col("instant"),
+    col("dependent_id"),
+    col("dependent_type"))
 
   private val logger = {
     val logger = Logger.getLogger(Common.getClass)
@@ -80,9 +123,13 @@ object Common {
       .drop("prior")
 
     // Compute transitive chains
-    var indexUpdates = nodeToWays.union(xToRelations).distinct // XXX
+    var indexUpdates = nodeToWays.select(Common.indexColumns: _*)
+      .union(xToRelations.select(Common.indexColumns: _*))
+      .distinct // XXX
     val index: DataFrame = existingIndex match {
-      case Some(existingIndex) => existingIndex.union(indexUpdates)
+      case Some(existingIndex) =>
+        existingIndex.select(Common.indexColumns: _*)
+          .union(indexUpdates.select(Common.indexColumns: _*))
       case None => indexUpdates
     }
     var keepGoing = true
@@ -100,7 +147,10 @@ object Common {
           col("right.dependent_id").as("dependent_id"),
           col("right.dependent_type").as("dependent_type"),
           col("right.instant").as("instant"))
-      indexUpdates = indexUpdates.union(additions).distinct // XXX
+      indexUpdates =
+        indexUpdates.select(Common.indexColumns: _*)
+          .union(additions.select(Common.indexColumns: _*))
+          .distinct // XXX
       keepGoing = !additions.rdd.isEmpty
       logger.info("transitive closure iteration")
     } while(keepGoing)

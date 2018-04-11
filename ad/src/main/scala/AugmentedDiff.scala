@@ -24,26 +24,29 @@ object AugmentedDiff {
   val window2 = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
   def augment(rows: DataFrame) = {
-    val dependents = spark.table("index").union(spark.table("index_updates"))
-      .join(
-        rows,
-        ((col("prior_id") === col("id")) &&
-         (col("prior_type") === col("type"))),
-        "left_semi")
-      .withColumn("row_number", row_number().over(window1))
-      .filter(col("row_number") === 1)
-      .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
-      .distinct
-    val priors = spark.table("index").union(spark.table("index_updates")).as("left")
-      .join(
-        dependents.as("right"),
-        ((col("left.dependent_id") === col("right.id")) &&
-         (col("left.dependent_type") === col("right.type"))),
-        "left_semi")
-      .withColumn("row_number", row_number().over(window1))
-      .filter(col("row_number") === 1)
-      .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
-      .distinct
+    val dependents =
+      spark.table("index").union(spark.table("index_updates")) // XXX
+        .join(
+          rows,
+          ((col("prior_id") === col("id")) &&
+           (col("prior_type") === col("type"))),
+          "left_semi")
+        .withColumn("row_number", row_number().over(window1))
+        .filter(col("row_number") === 1)
+        .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
+        .union(rows.select(col("id"), col("type"), Common.getInstant(col("timestamp")).as("instant")))
+        .distinct
+    val priors =
+      spark.table("index").union(spark.table("index_updates")).as("left") // XXX
+        .join(
+          dependents.as("right"),
+          ((col("left.dependent_id") === col("right.id")) &&
+           (col("left.dependent_type") === col("right.type"))),
+          "left_semi")
+        .withColumn("row_number", row_number().over(window1))
+        .filter(col("row_number") === 1)
+        .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
+        .distinct
     spark.table("osm").union(spark.table("osm_updates")).as("left")
       .join(
         dependents.union(priors).as("right"),

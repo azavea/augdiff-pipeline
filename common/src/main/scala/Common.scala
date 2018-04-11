@@ -71,6 +71,7 @@ object Common {
     col("instant"),
     col("dependent_id"),
     col("dependent_type"))
+  val indexColumns2: List[Column] = indexColumns ++ List(col("iteration"))
 
   private val logger = {
     val logger = Logger.getLogger(Common.getClass)
@@ -84,6 +85,7 @@ object Common {
   }
 
   def saveBulk(bulk: DataFrame, tableName: String, mode: String): Unit = {
+    logger.info(s"Writing bulk")
     bulk
       .write
       .mode(mode)
@@ -93,6 +95,7 @@ object Common {
   }
 
   def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
+    logger.info(s"Writing index")
     index
       .write
       .mode(mode)
@@ -125,6 +128,7 @@ object Common {
     // Compute transitive chains
     var indexUpdates = nodeToWays.select(Common.indexColumns: _*)
       .union(xToRelations.select(Common.indexColumns: _*))
+      .withColumn("iteration", lit(0L))
       .distinct // XXX
     val index: DataFrame = existingIndex match {
       case Some(existingIndex) =>
@@ -132,27 +136,35 @@ object Common {
           .union(indexUpdates.select(Common.indexColumns: _*))
       case None => indexUpdates
     }
-    var keepGoing = true
+    var i: Long = 1; var keepGoing = true
     do {
+      logger.info(s"Transitive closure iteration $i")
       val additions = index.as("left") // somewhat overkill
         .join(
-          indexUpdates.as("right"),
+          indexUpdates.filter(col("iteration") === (i-1)).as("right"),
           ((col("left.dependent_id") === col("right.prior_id")) &&
            (col("left.dependent_type") === col("right.prior_type")) &&
-           (col("left.instant") <= col("right.instant"))),
+           (col("left.instant") <= col("right.instant"))), // XXX <=
           "inner")
         .select(
           col("left.prior_id").as("prior_id"),
           col("left.prior_type").as("prior_type"),
           col("right.dependent_id").as("dependent_id"),
           col("right.dependent_type").as("dependent_type"),
-          col("right.instant").as("instant"))
+          col("left.instant").as("instant"),  // XXX instant?
+          lit(i).as("iteration"))
+        .filter(!(col("prior_id") === col("dependent_id") && col("prior_type") === col("dependent_type")))
+      try {
+        additions.head
+        keepGoing = true
+      } catch {
+        case e: Exception => keepGoing = false
+      }
       indexUpdates =
-        indexUpdates.select(Common.indexColumns: _*)
-          .union(additions.select(Common.indexColumns: _*))
+        indexUpdates.select(Common.indexColumns2: _*)
+          .union(additions.select(Common.indexColumns2: _*))
           .distinct // XXX
-      keepGoing = !additions.rdd.isEmpty
-      logger.info("transitive closure iteration")
+      i=i+1
     } while(keepGoing)
 
     // Return index

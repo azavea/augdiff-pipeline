@@ -130,6 +130,7 @@ object Common {
       .union(xToRelations.select(Common.indexColumns: _*))
       .withColumn("iteration", lit(0L))
       .distinct // XXX
+      .cache
     val index: DataFrame = existingIndex match {
       case Some(existingIndex) =>
         existingIndex.select(Common.indexColumns: _*)
@@ -154,16 +155,21 @@ object Common {
           col("left.instant").as("instant"),  // XXX instant?
           lit(i).as("iteration"))
         .filter(!(col("prior_id") === col("dependent_id") && col("prior_type") === col("dependent_type")))
+        .cache
       try {
         additions.head
         keepGoing = true
       } catch {
         case e: Exception => keepGoing = false
       }
+      val oldIndexUpdates = indexUpdates
       indexUpdates =
         indexUpdates.select(Common.indexColumns2: _*)
           .union(additions.select(Common.indexColumns2: _*))
           .distinct // XXX
+          .cache
+      oldIndexUpdates.unpersist
+      additions.unpersist
       i=i+1
     } while(keepGoing)
 

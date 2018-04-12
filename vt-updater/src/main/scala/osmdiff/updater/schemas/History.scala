@@ -1,6 +1,7 @@
 package osmdiff.updater.schemas
 
-import geotrellis.vectortile.Layer
+import geotrellis.vector.Feature
+import geotrellis.vectortile.{Layer, VInt64, VString, Value}
 import org.apache.log4j.Logger
 import org.joda.time.DateTime
 import osmdiff.updater.Implicits._
@@ -92,6 +93,46 @@ class History(override val layer: Layer, override val features: Map[String, Augm
       .values
       .flatten
       .toSeq
+  }
+
+  private def makeFeature(feature: AugmentedDiffFeature, minorVersion: Int, validUntil: Option[Long] = None): Option[VTFeature] = {
+    val id = feature.data.id
+
+    val elementId = feature.data.elementType match {
+      case "node" => s"n$id"
+      case "way" => s"w$id"
+      case "relation" => s"r$id"
+      case _ => id.toString
+    }
+
+    feature match {
+      case _ if feature.geom.isValid =>
+        Some(
+          Feature(
+            feature.geom,
+            feature.data.tags.map {
+              case (k, v) => (k, VString(v))
+            } ++ Map(
+              "__id" -> VString(elementId),
+              "__changeset" -> VInt64(feature.data.changeset),
+              "__updated" -> VInt64(feature.data.timestamp.getMillis),
+              "__validUntil" -> VInt64(validUntil.getOrElse(0L)),
+              "__version" -> VInt64(feature.data.version),
+              "__minorVersion" -> VInt64(minorVersion),
+              "__uid" -> VInt64(feature.data.uid),
+              "__user" -> VString(feature.data.user)
+            )
+          )
+        )
+      case _ => None
+    }
+  }
+
+  private def updateFeature(feature: VTFeature, validUntil: DateTime): VTFeature = {
+    Feature(
+      feature.geom,
+      feature.data.updated("__validUntil", VInt64(validUntil.getMillis))
+    )
   }
 }
 

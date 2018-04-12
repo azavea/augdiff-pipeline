@@ -9,7 +9,6 @@ import geotrellis.spark.tiling.{LayoutDefinition, ZoomedLayoutScheme}
 import geotrellis.vector.{Extent, Feature, Geometry, Line, MultiLine, MultiPoint, MultiPolygon, Point, Polygon}
 import geotrellis.vectortile._
 import org.apache.log4j.Logger
-import org.joda.time.DateTime
 import osmdiff.updater.Implicits._
 
 import scala.collection.mutable.ListBuffer
@@ -38,45 +37,6 @@ package object updater {
 
   def write(path: URI, bytes: Array[Byte]) = {
     Files.write(Paths.get(path), bytes)
-  }
-
-  def makeFeature(feature: AugmentedDiffFeature, minorVersion: Option[Int] = None, validUntil: Option[Long] = None): Option[VTFeature] = {
-    val id = feature.data.id
-
-    val elementId = feature.data.elementType match {
-      case "node" => s"n$id"
-      case "way" => s"w$id"
-      case "relation" => s"r$id"
-      case _ => id.toString
-    }
-
-    feature match {
-      case _ if feature.geom.isValid =>
-        Some(
-          Feature(
-            feature.geom,
-            feature.data.tags.map {
-              case (k, v) => (k, VString(v))
-            } ++ Map(
-              "__id" -> VString(elementId),
-              "__changeset" -> VInt64(feature.data.changeset),
-              "__updated" -> VInt64(feature.data.timestamp.getMillis),
-              "__validUntil" -> VInt64(validUntil.getOrElse(0L)),
-              "__version" -> VInt64(feature.data.version),
-              "__uid" -> VInt64(feature.data.uid),
-              "__user" -> VString(feature.data.user)
-            ) ++ minorVersion.map(v => Map("__minorVersion" -> VInt64(v))).getOrElse(Map.empty[String, Value])
-          )
-        )
-      case _ => None
-    }
-  }
-
-  def updateFeature(feature: VTFeature, validUntil: DateTime): VTFeature = {
-    Feature(
-      feature.geom,
-      feature.data.updated("__validUntil", VInt64(validUntil.getMillis))
-    )
   }
 
   def tile(features: Seq[AugmentedDiffFeature], layout: LayoutDefinition): Map[SpatialKey, Seq[AugmentedDiffFeature]] = {

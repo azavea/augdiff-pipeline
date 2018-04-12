@@ -13,10 +13,10 @@ object Common {
   def sparkSession(appName: String): SparkSession = {
     val conf = new SparkConf()
       .setAppName(appName)
-      .setIfMissing("spark.master", "local[*]")
       .setIfMissing("spark.executor.heartbeatInterval", "30")
+      .setIfMissing("spark.hadoop.hive.execution.engine", "spark")
+      .setIfMissing("spark.master", "local[*]")
       .set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-      .set("spark.hadoop.hive.execution.engine", "spark")
       .set("spark.hadoop.hive.vectorized.execution.enabled", "true")
       .set("spark.hadoop.hive.vectorized.execution.reduce.enabled", "true")
       .set("spark.sql.hive.metastorePartitionPruning", "true")

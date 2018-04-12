@@ -1,0 +1,29 @@
+{
+    "image": "${batch_image_url}",
+    "vcpus": 8,
+    "memory": 8192,
+    "command": [
+        "--start", "1"
+    ],
+    "volumes": [
+        {
+            "host": {
+                "sourcePath": "/media/ephemeral0"
+            },
+            "name": "ephemeral0"
+        }
+    ],
+    "environment": [
+        {
+            "name": "AWS_DEFAULT_REGION",
+            "value": "${aws_region}"
+        }
+    ],
+    "mountPoints": [
+        {
+            "containerPath": "/tmp/data",
+            "readOnly": false,
+            "sourceVolume": "ephemeral0"
+        }
+    ]
+}

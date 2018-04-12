@@ -12,6 +12,7 @@ import geotrellis.vector.{Feature, Geometry}
 import geotrellis.vectortile._
 import org.apache.log4j.Logger
 import org.joda.time.DateTime
+import osmdiff.updater.Implicits._
 
 import scala.io.Source
 
@@ -75,7 +76,8 @@ object TileUpdater extends CommandApp(
     (replicationSourceOpt, tileSourceOpt, layerNameOpt, minZoomOpt, maxZoomOpt, historyOpt, dryRunOpt, verboseOpt,
       sequenceOpt).mapN {
       (replicationSource, tileSource, layerName, minZoom, maxZoom, history, dryRun, verbose, sequence) =>
-        logger.info(s"Fetching $sequence from $replicationSource and updating $tileSource from zoom $minZoom to $maxZoom")
+        logger.info(s"Fetching $sequence from $replicationSource and updating $tileSource from zoom $minZoom to " +
+          s"$maxZoom")
 
         val source = Source.fromFile(replicationSource.resolve(s"$sequence.json"))
 
@@ -105,15 +107,20 @@ object TileUpdater extends CommandApp(
             val uri = tileSource.resolve(filename)
 
             if (exists(uri)) {
-              if (verbose) {
-                println(filename)
-              }
-
               val extent = sk.extent(layout)
               val tile = VectorTile.fromBytes(read(uri), extent)
 
-              val feats = t.map(_._2)
-              val featuresById = feats.groupBy(_.data.elementId)
+              // reproject and clip geometries to the target extent
+              val feats = t
+                .map(_._2)
+                .map(_.mapGeom(_.reproject(LatLng, WebMercator)))
+                .filter(_.geom.isValid)
+                .map(_.mapGeom(_.intersection(extent).toGeometry.orNull))
+                .filter(f => Option(f.geom).isDefined)
+
+              val featuresById = feats
+                .groupBy(_.data.elementId)
+                .mapValues(fs => fs.head)
               val featureIds = featuresById.keySet
 
               // load the target layer
@@ -124,17 +131,19 @@ object TileUpdater extends CommandApp(
               // fetch unmodified features
               val unmodifiedFeatures = layer
                 .features
-                .filterNot(f => featureIds.contains(f.data("__id").asInstanceOf[VString].value))
+                .filterNot(f => featureIds.contains(f.data("__id")))
 
-              val (replacementFeatures: Seq[Feature[Geometry, Map[String, Value]]], lastVersionsById: Map[String, (Int, Int, DateTime)]) = if (history) {
+              val (replacementFeatures: Seq[Feature[Geometry, Map[String, Value]]], lastVersionsById: Map[String,
+                (Int, Int, DateTime)]) = if (history) {
                 val modifiedFeatures: Map[String, Seq[Feature[Geometry, Map[String, Value]]]] = layer
                   .features
-                  .filter(f => featureIds.contains(f.data("__id").asInstanceOf[VString].value))
-                  .groupBy(f => f.data("__id").asInstanceOf[VString].value)
+                  .filter(f => featureIds.contains(f.data("__id")))
+                  .groupBy(f => f.data("__id"): String)
                   .mapValues(fs => fs
-                    .sortWith(_.data("__minorVersion").asInstanceOf[VInt64].value < _.data("__minorVersion").asInstanceOf[VInt64].value)
-                    .sortWith(_.data("__version").asInstanceOf[VInt64].value < _.data("__version").asInstanceOf[VInt64].value))
+                    .sortWith(_.data("__minorVersion") < _.data("__minorVersion"))
+                    .sortWith(_.data("__version") < _.data("__version")))
 
+                // TODO when applying the same diff repeatedly this shouldn't change
                 val featuresToKeep = modifiedFeatures
                   .mapValues(fs => fs.dropRight(1))
                   .values
@@ -148,16 +157,18 @@ object TileUpdater extends CommandApp(
 
                 val lastVersionsById = lastVersions
                   .mapValues(f => (
-                    f.data("__version").asInstanceOf[VInt64].value.toInt,
-                    f.data("__minorVersion").asInstanceOf[VInt64].value.toInt,
-                    new DateTime(f.data("__updated").asInstanceOf[VInt64].value)
+                    f.data("__version").toInt,
+                    f.data("__minorVersion").toInt,
+                    new DateTime(f.data("__updated"): Long)
                   ))
 
+                // if features were already updated in a previous run this will merely rewrite them with the same
+                // 'validUntil value
                 val replacedFeatures = lastVersions
-                  .map { case (id, f) => updateFeature(f, featuresById(id).last.data.timestamp) }
+                  .map { case (id, f) => updateFeature(f, featuresById(id).data.timestamp) }
                   .toSeq
 
-                logger.info(s"Replacing ${replacedFeatures.length.formatted("%,d")} features")
+                logger.info(s"Rewriting ${replacedFeatures.length.formatted("%,d")} features")
 
                 (featuresToKeep ++ replacedFeatures, lastVersionsById)
               } else {
@@ -170,33 +181,54 @@ object TileUpdater extends CommandApp(
                   .groupBy(f => f.data.elementId)
                   .mapValues(f => f.head.data)
                   .mapValues(f => (f.elementId, f.version, f.timestamp))
-                  .mapValues { case (id, version, timestamp) =>
-                      lastVersionsById.get(id) match {
-                        case Some((prevVersion, _, _)) if prevVersion < version => 0
-                        case Some((prevVersion, prevMinorVersion, prevTimestamp)) if prevVersion == version && prevTimestamp.isBefore(timestamp) => prevMinorVersion + 1
-                        case Some((prevVersion, prevMinorVersion, _)) if prevVersion == version => prevMinorVersion
-                        case _ => 0
-                      }
+                  .mapValues { case (id, version, _) =>
+                    lastVersionsById.get(id) match {
+                      case Some((prevVersion, _, _)) if prevVersion < version => 0
+                      case Some((prevVersion, prevMinorVersion, _)) if prevVersion == version => prevMinorVersion + 1
+                      case _ => 0
+                    }
                   }
 
-                feats.map(x => makeFeature(x, minorVersions.get(x.data.elementId))).filter(_.isDefined).map(_.get)
+                feats
+                  .filter(f =>
+                    lastVersionsById.get(f.data.elementId) match {
+                      case Some((_, _, prevTimestamp)) if f.data.timestamp.isAfter(prevTimestamp) => true
+                      case None => true
+                      case _ => false
+                    }
+                  )
+                  .map(x => makeFeature(x, minorVersions.get(x.data.elementId)))
+                  .filter(_.isDefined)
+                  .map(_.get)
               } else {
-                feats.map(makeFeature(_)).filter(_.isDefined).map(_.get)
+                feats
+                  .map(makeFeature(_))
+                  .filter(_.isDefined)
+                  .map(_.get)
               }
 
-              logger.info(s"Adding ${newFeatures.length.formatted("%,d")} features")
+              if (newFeatures.nonEmpty) {
+                logger.info(s"Adding ${newFeatures.length.formatted("%,d")} features")
+              }
 
-              val updatedFeatures = unmodifiedFeatures ++ replacementFeatures ++ newFeatures
+              unmodifiedFeatures ++ replacementFeatures ++ newFeatures match {
+                case updatedFeatures if updatedFeatures.nonEmpty =>
+                  val updatedLayer = makeLayer(layerName, extent, updatedFeatures)
 
-              val updatedLayer = makeLayer(layerName, extent, updatedFeatures)
+                  // merge all available layers into a new tile
+                  val newTile = VectorTile(tile.layers.updated(layerName, updatedLayer), extent)
 
-              // merge all available layers into a new tile
-              val newTile = VectorTile(tile.layers.updated(layerName, updatedLayer), extent)
+                  if (dryRun) {
+                    println(s"Would write ${newTile.toBytes.length.formatted("%,d")} bytes to $uri")
+                  } else {
+                    write(uri, newTile.toBytes)
+                  }
 
-              if (dryRun) {
-                println(s"Would write ${newTile.toBytes.length.formatted("%,d")} bytes to $uri")
-              } else {
-                write(uri, newTile.toBytes)
+                  if (verbose) {
+                    println(filename)
+                  }
+                case _ if dryRun =>
+                  println(s"No changes to $uri; skipping")
               }
             }
           }

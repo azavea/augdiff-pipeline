@@ -4,7 +4,6 @@ import java.io.File
 import java.net.URI
 import java.nio.file.{Files, Paths}
 
-import geotrellis.proj4.{LatLng, WebMercator}
 import geotrellis.vector.{Extent, Feature, Geometry, Line, MultiLine, MultiPoint, MultiPolygon, Point, Polygon}
 import geotrellis.vectortile._
 import org.joda.time.DateTime
@@ -36,21 +35,21 @@ package object updater {
       case _ => id.toString
     }
 
-    feature.mapGeom(_.reproject(LatLng, WebMercator)) match {
-      case f if f.geom.isValid =>
+    feature match {
+      case _ if feature.geom.isValid =>
         Some(
           Feature(
-            f.geom,
-            f.data.tags.map {
+            feature.geom,
+            feature.data.tags.map {
               case (k, v) => (k, VString(v))
             } ++ Map(
               "__id" -> VString(elementId),
-              "__changeset" -> VInt64(f.data.changeset),
-              "__updated" -> VInt64(f.data.timestamp.getMillis),
+              "__changeset" -> VInt64(feature.data.changeset),
+              "__updated" -> VInt64(feature.data.timestamp.getMillis),
               "__validUntil" -> VInt64(validUntil.getOrElse(0L)),
-              "__version" -> VInt64(f.data.version),
-              "__uid" -> VInt64(f.data.uid),
-              "__user" -> VString(f.data.user)
+              "__version" -> VInt64(feature.data.version),
+              "__uid" -> VInt64(feature.data.uid),
+              "__user" -> VString(feature.data.user)
             ) ++ minorVersion.map(v => Map("__minorVersion" -> VInt64(v))).getOrElse(Map.empty[String, Value])
           )
         )
@@ -61,7 +60,7 @@ package object updater {
   def updateFeature(feature: Feature[Geometry, Map[String, Value]], validUntil: DateTime): Feature[Geometry, Map[String, Value]] = {
     Feature(
       feature.geom,
-      feature.data ++ Map("__validUntil" -> VInt64(validUntil.getMillis))
+      feature.data.updated("__validUntil", VInt64(validUntil.getMillis))
     )
   }
 

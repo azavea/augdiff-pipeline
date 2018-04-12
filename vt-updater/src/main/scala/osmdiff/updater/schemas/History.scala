@@ -95,7 +95,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
       .toSeq
   }
 
-  private def makeFeature(feature: AugmentedDiffFeature, minorVersion: Int, validUntil: Option[Long] = None): Option[VTFeature] = {
+  private def makeFeature(feature: AugmentedDiffFeature, minorVersion: Option[Int], validUntil: Option[Long] = None): Option[VTFeature] = {
     val id = feature.data.id
 
     val elementId = feature.data.elementType match {
@@ -118,10 +118,9 @@ class History(override val layer: Layer, override val features: Map[String, Augm
               "__updated" -> VInt64(feature.data.timestamp.getMillis),
               "__validUntil" -> VInt64(validUntil.getOrElse(0L)),
               "__version" -> VInt64(feature.data.version),
-              "__minorVersion" -> VInt64(minorVersion),
               "__uid" -> VInt64(feature.data.uid),
               "__user" -> VString(feature.data.user)
-            )
+            ) ++ minorVersion.map(v => Map("__minorVersion" -> VInt64(v))).getOrElse(Map.empty[String, Value])
           )
         )
       case _ => None

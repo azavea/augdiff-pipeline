@@ -34,39 +34,46 @@ object AugmentedDiff {
             case Some(JsString(v)) => v.toLong
             case Some(JsNumber(v)) => v.toLong
             case Some(v) => throw DeserializationException(s"'changeset' must be a number, got $v")
+            case None => throw DeserializationException(s"'changeset' is required")
           }
 
           val id = fields.get("id") match {
             case Some(JsString(v)) => v.toLong
             case Some(JsNumber(v)) => v.toLong
             case Some(v) => throw DeserializationException(s"'id' must be a number, got $v")
+            case None => throw DeserializationException(s"'id' is required")
           }
 
           val elementType = fields.get("type") match {
             case Some(JsString(v)) => v
             case Some(v) => throw DeserializationException(s"'type' must be a string, got $v")
+            case None => throw DeserializationException(s"'type' is required")
           }
 
           val timestamp = fields.get("timestamp") match {
             case Some(JsString(v)) => ISODateTimeFormat.dateTimeParser().parseDateTime(v)
             case Some(v) => throw DeserializationException(s"'type' must be a string, got $v")
+            case None => throw DeserializationException(s"'timestamp' is required")
           }
 
           val uid = fields.get("uid") match {
             case Some(JsString(v)) => v.toLong
             case Some(JsNumber(v)) => v.toLong
             case Some(v) => throw DeserializationException(s"'uid' must be a number, got $v")
+            case None => throw DeserializationException(s"'uid' is required")
           }
 
           val user = fields.get("user") match {
             case Some(JsString(v)) => v
             case Some(v) => throw DeserializationException(s"'user' must be a string, got $v")
+            case None => throw DeserializationException(s"'uid' is required")
           }
 
           val version = fields.get("version") match {
             case Some(JsString(v)) => v.toInt
             case Some(JsNumber(v)) => v.toInt
             case Some(v) => throw DeserializationException(s"'version' must be a number, got $v")
+            case None => throw DeserializationException(s"'version' is required")
           }
 
           val tags = fields.get("tags") match {
@@ -75,6 +82,7 @@ object AugmentedDiff {
               case v => throw DeserializationException(s"tag value must be a string, got $v")
             }
             case Some(v) => throw DeserializationException(s"'tags' must be an object, got $v")
+            case None => throw DeserializationException(s"'tags' is required")
           }
 
           AugmentedDiff(changeset, id, elementType, timestamp, uid, user, version, tags)

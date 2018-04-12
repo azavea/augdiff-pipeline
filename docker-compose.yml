@@ -11,7 +11,6 @@ services:
     image: postgres:10.3
     volumes:
       - ./data/pgdata:/var/lib/postgresql/data/pgdata
-      - ./data/warehouse:/warehouse
     environment:
       - PGDATA=/var/lib/postgresql/data/pgdata
       - POSTGRES_DB=metastore

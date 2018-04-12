@@ -43,11 +43,12 @@
     <description>password to use against metastore database</description>
   </property>
 
-  <property>
-    <name>hive.metastore.warehouse.dir</name>
-    <value>file:///warehouse</value>
-    <description>location of default database for the warehouse</description>
-  </property>
+  <!-- hive.metastore.warehouse.dir deprecated: https://spark.apache.org/docs/latest/sql-programming-guide.html#sql -->
+  <!-- <property> -->
+  <!--   <name>hive.metastore.warehouse.dir</name> -->
+  <!--   <value>file:///warehouse</value> -->
+  <!--   <description>location of default database for the warehouse</description> -->
+  <!-- </property> -->
 
 </configuration>
 

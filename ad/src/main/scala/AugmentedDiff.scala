@@ -24,7 +24,14 @@ object AugmentedDiff {
   val window2 = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
   def augment(rows: DataFrame) = {
-    val dependents = spark.table("index").union(spark.table("index_updates"))
+    val index =
+      spark.table("index").select(Common.indexColumns: _*)
+        .union(spark.table("index_updates").select(Common.indexColumns: _*))
+    val osm =
+      spark.table("osm").select(Common.osmColumns: _*)
+        .union(spark.table("osm_updates").select(Common.osmColumns: _*))
+
+    val dependents = index.as("left")
       .join(
         rows,
         ((col("prior_id") === col("id")) &&
@@ -33,8 +40,10 @@ object AugmentedDiff {
       .withColumn("row_number", row_number().over(window1))
       .filter(col("row_number") === 1)
       .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
-      .distinct
-    val priors = spark.table("index").union(spark.table("index_updates")).as("left")
+      .union(rows.select(col("id"), col("type"), Common.getInstant(col("timestamp")).as("instant")))
+      .distinct // XXX
+      .select(col("id"), col("type"), col("instant"))
+    val priors = index.as("left")
       .join(
         dependents.as("right"),
         ((col("left.dependent_id") === col("right.id")) &&
@@ -43,8 +52,9 @@ object AugmentedDiff {
       .withColumn("row_number", row_number().over(window1))
       .filter(col("row_number") === 1)
       .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
-      .distinct
-    spark.table("osm").union(spark.table("osm_updates")).as("left")
+      .distinct // XXX
+      .select(col("id"), col("type"), col("instant"))
+    osm.as("left")
       .join(
         dependents.union(priors).as("right"),
         ((col("left.id") === col("right.id")) &&

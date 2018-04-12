@@ -3,7 +3,7 @@ package osmdiff
 import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.types.StructType
 
 import org.openstreetmap.osmosis.core.container.v0_6._
 import org.openstreetmap.osmosis.core.domain.v0_6._
@@ -16,26 +16,6 @@ import java.sql.Timestamp
 
 
 object ChangeAugmenter {
-
-  val ndsSchema = ArrayType(StructType(List(StructField("ref", LongType, true))))
-  val membersSchema = ArrayType(StructType(List(
-    StructField("type", StringType, true),
-    StructField("ref", LongType, true),
-    StructField("role", StringType, true))))
-  val osmSchema = StructType(List(
-    StructField("id", LongType, true),
-    StructField("type", StringType, true),
-    StructField("tags", MapType(StringType, StringType), true),
-    StructField("lat", DecimalType(9, 7), true),
-    StructField("lon", DecimalType(10, 7), true),
-    StructField("nds", ndsSchema, true),
-    StructField("members", membersSchema, true),
-    StructField("changeset", LongType, true),
-    StructField("timestamp", TimestampType, true),
-    StructField("uid", LongType, true),
-    StructField("user", StringType, true),
-    StructField("version", LongType, true),
-    StructField("visible", BooleanType, true)))
 
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
@@ -135,7 +115,7 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
     val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(ab.toList),
-      StructType(osmSchema))
+      StructType(Common.osmSchema))
     val lastLive = osm
       .withColumn("row_number", row_number().over(window))
       .filter(col("row_number") === 1) // Most recent version of this id×type pair

@@ -133,8 +133,7 @@ object TileUpdater extends CommandApp(
                 .features
                 .filterNot(f => featureIds.contains(f.data("__id")))
 
-              val (replacementFeatures: Seq[Feature[Geometry, Map[String, Value]]], lastVersionsById: Map[String,
-                (Int, Int, DateTime)]) = if (history) {
+              val (retainedFeatures, replacementFeatures, lastVersionsById: Map[String, (Int, Int, DateTime)]) = if (history) {
                 val modifiedFeatures: Map[String, Seq[Feature[Geometry, Map[String, Value]]]] = layer
                   .features
                   .filter(f => featureIds.contains(f.data("__id")))
@@ -143,14 +142,23 @@ object TileUpdater extends CommandApp(
                     .sortWith(_.data("__minorVersion") < _.data("__minorVersion"))
                     .sortWith(_.data("__version") < _.data("__version")))
 
-                // TODO when applying the same diff repeatedly this shouldn't change
-                val featuresToKeep = modifiedFeatures
-                  .mapValues(fs => fs.dropRight(1))
+                val activeFeatures = modifiedFeatures
+                  .filter {
+                    case (id, fs) =>
+                      featuresById(id).data.timestamp.isAfter(fs.last.data("__updated"))
+                  }
+
+                val featuresToKeep = activeFeatures
+                  .mapValues(fs => fs.filterNot(_.data("__validUntil").toLong == 0))
                   .values
                   .flatten
                   .toSeq
 
-                logger.info(s"Keeping ${(unmodifiedFeatures.length + featuresToKeep.length).formatted("%,d")} features")
+                val featuresToReplace = activeFeatures
+                  .mapValues(fs => fs.filter(_.data("__validUntil").toLong == 0))
+                  .values
+                  .flatten
+                  .toSeq
 
                 val lastVersions = modifiedFeatures
                   .mapValues(_.last)
@@ -162,18 +170,15 @@ object TileUpdater extends CommandApp(
                     new DateTime(f.data("__updated"): Long)
                   ))
 
-                // if features were already updated in a previous run this will merely rewrite them with the same
-                // 'validUntil value
-                val replacedFeatures = lastVersions
-                  .map { case (id, f) => updateFeature(f, featuresById(id).data.timestamp) }
-                  .toSeq
+                val replacedFeatures = featuresToReplace
+                  .map(f => updateFeature(f, featuresById(f.data("__id")).data.timestamp))
 
                 logger.info(s"Rewriting ${replacedFeatures.length.formatted("%,d")} features")
 
-                (featuresToKeep ++ replacedFeatures, lastVersionsById)
+                (featuresToKeep, replacedFeatures, lastVersionsById)
               } else {
                 logger.info(s"Keeping ${unmodifiedFeatures.length.formatted("%,d")} features")
-                (Seq.empty[Feature[Geometry, Map[String, Value]]], Map.empty[Long, (Int, Int)])
+                (Seq.empty[Feature[Geometry, Map[String, Value]]], Seq.empty[Feature[Geometry, Map[String, Value]]], Map.empty[Long, (Int, Int)])
               }
 
               val newFeatures = if (history) {
@@ -211,8 +216,8 @@ object TileUpdater extends CommandApp(
                 logger.info(s"Adding ${newFeatures.length.formatted("%,d")} features")
               }
 
-              unmodifiedFeatures ++ replacementFeatures ++ newFeatures match {
-                case updatedFeatures if updatedFeatures.nonEmpty =>
+              unmodifiedFeatures ++ retainedFeatures ++ replacementFeatures ++ newFeatures match {
+                case updatedFeatures if (replacementFeatures.length + newFeatures.length) > 0 =>
                   val updatedLayer = makeLayer(layerName, extent, updatedFeatures)
 
                   // merge all available layers into a new tile
@@ -227,7 +232,7 @@ object TileUpdater extends CommandApp(
                   if (verbose) {
                     println(filename)
                   }
-                case _ if dryRun =>
+                case _ =>
                   println(s"No changes to $uri; skipping")
               }
             }

@@ -23,7 +23,6 @@ case class AugmentedDiff(
 }
 
 object AugmentedDiff {
-
   implicit object AugmentedDiffFormat extends RootJsonReader[AugmentedDiff] {
     def read(value: JsValue): AugmentedDiff =
       value match {
@@ -89,5 +88,4 @@ object AugmentedDiff {
         case _ => throw DeserializationException(s"'properties' is required")
       }
   }
-
 }

@@ -61,54 +61,57 @@ package object updater {
     val layout = LayoutScheme.levelForZoom(zoom).layout
     val tiles = tile(features, layout)
 
-    for ((sk, feats) <- tiles) {
-      val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
-      val uri = tileSource.resolve(filename)
+    tiles
+      .par
+      .foreach {
+        case (sk, feats) =>
+          val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
+          val uri = tileSource.resolve(filename)
 
-      read(uri) match {
-        case Some(bytes) =>
-          val extent = sk.extent(layout)
-          val tile = VectorTile.fromBytes(bytes, extent)
+          read(uri) match {
+            case Some(bytes) =>
+              val extent = sk.extent(layout)
+              val tile = VectorTile.fromBytes(bytes, extent)
 
-          val featuresById = feats
-            .groupBy(_.data.elementId)
-            .mapValues(fs => fs.head)
-          val featureIds = featuresById.keySet
+              val featuresById = feats
+                .groupBy(_.data.elementId)
+                .mapValues(fs => fs.head)
+              val featureIds = featuresById.keySet
 
-          // load the target layer
-          val layer = tile.layers(layerName)
+              // load the target layer
+              val layer = tile.layers(layerName)
 
-          logger.debug(s"Inspecting ${layer.features.size.formatted("%,d")} features in layer '$layerName'")
+              logger.debug(s"Inspecting ${layer.features.size.formatted("%,d")} features in layer '$layerName'")
 
-          // fetch unmodified features
-          val unmodifiedFeatures = layer
-            .features
-            .filterNot(f => featureIds.contains(f.data("__id")))
+              // fetch unmodified features
+              val unmodifiedFeatures = layer
+                .features
+                .filterNot(f => featureIds.contains(f.data("__id")))
 
-          val schema: Schema = schemaType(layer, featuresById)
+              val schema: Schema = schemaType(layer, featuresById)
 
-          val retainedFeatures = schema.retainedFeatures
-          val replacementFeatures = schema.replacementFeatures
-          val newFeatures = schema.newFeatures
+              val retainedFeatures = schema.retainedFeatures
+              val replacementFeatures = schema.replacementFeatures
+              val newFeatures = schema.newFeatures
 
-          if (newFeatures.nonEmpty) {
-            logger.info(s"Adding ${newFeatures.length.formatted("%,d")} features")
+              if (newFeatures.nonEmpty) {
+                logger.info(s"Adding ${newFeatures.length.formatted("%,d")} features")
+              }
+
+              unmodifiedFeatures ++ retainedFeatures ++ replacementFeatures ++ newFeatures match {
+                case updatedFeatures if (replacementFeatures.length + newFeatures.length) > 0 =>
+                  val updatedLayer = makeLayer(layerName, extent, updatedFeatures)
+
+                  // merge all available layers into a new tile
+                  val newTile = VectorTile(tile.layers.updated(layerName, updatedLayer), extent)
+
+                  process(sk, newTile)
+                case _ =>
+                  println(s"No changes to $uri; skipping")
+              }
+            case None =>
           }
-
-          unmodifiedFeatures ++ retainedFeatures ++ replacementFeatures ++ newFeatures match {
-            case updatedFeatures if (replacementFeatures.length + newFeatures.length) > 0 =>
-              val updatedLayer = makeLayer(layerName, extent, updatedFeatures)
-
-              // merge all available layers into a new tile
-              val newTile = VectorTile(tile.layers.updated(layerName, updatedLayer), extent)
-
-              process(sk, newTile)
-            case _ =>
-              println(s"No changes to $uri; skipping")
-          }
-        case None =>
       }
-    }
   }
 
   def segregate(features: Seq[VTFeature]): (Seq[TypedVTFeature[Point]], Seq[TypedVTFeature[MultiPoint]], Seq[TypedVTFeature[Line]], Seq[TypedVTFeature[MultiLine]], Seq[TypedVTFeature[Polygon]], Seq[TypedVTFeature[MultiPolygon]]) = {

@@ -117,8 +117,8 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       spark.sparkContext.parallelize(ab.toList),
       StructType(Common.osmSchema))
     val lastLive = osm
-      .withColumn("row_number", row_number().over(window))
-      .filter(col("row_number") === 1) // Most recent version of this id×type pair
+      .withColumn("rank", rank().over(window))
+      .filter(col("rank") === 1) // Most recent version of this id×type pair
       .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
     val index = Common.transitiveClosure(osm, Some(spark.table("index")))
 

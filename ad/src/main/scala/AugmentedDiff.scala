@@ -37,8 +37,8 @@ object AugmentedDiff {
         ((col("prior_id") === col("id")) &&
          (col("prior_type") === col("type"))),
         "left_semi")
-      .withColumn("row_number", row_number().over(window1))
-      .filter(col("row_number") === 1)
+      .withColumn("rank", rank().over(window1))
+      .filter(col("rank") === 1)
       .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
       .union(rows.select(col("id"), col("type"), Common.getInstant(col("timestamp")).as("instant")))
       .distinct // XXX
@@ -49,8 +49,8 @@ object AugmentedDiff {
         ((col("left.dependent_id") === col("right.id")) &&
          (col("left.dependent_type") === col("right.type"))),
         "left_semi")
-      .withColumn("row_number", row_number().over(window1))
-      .filter(col("row_number") === 1)
+      .withColumn("rank", rank().over(window1))
+      .filter(col("rank") === 1)
       .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
       .distinct // XXX
       .select(col("id"), col("type"), col("instant"))
@@ -61,9 +61,9 @@ object AugmentedDiff {
          (col("left.type") === col("right.type")) &&
          Common.getInstant(col("left.timestamp")) >= (col("right.instant"))),
         "left_semi")
-      .withColumn("row_number", row_number().over(window2))
-      .filter(col("row_number") === 1)
-      .drop("row_number")
+      .withColumn("rank", rank().over(window2))
+      .filter(col("rank") === 1)
+      .drop("rank")
   }
 
   def main(args: Array[String]): Unit = {

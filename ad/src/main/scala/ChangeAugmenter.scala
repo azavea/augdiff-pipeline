@@ -29,14 +29,15 @@ object ChangeAugmenter {
     val lon = null
     val nds = Array.empty[Row]
     val members = Array.empty[Row]
-    val typeString: String = entity.getType match {
+    val tipe: String = entity.getType match {
       case EntityType.Node => "node"
       case EntityType.Way => "way"
       case EntityType.Relation => "relation"
       case _ => throw new Exception
     }
+    val p = Common.partitionNumberFn(id, tipe)
 
-    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
   }
 
   def entityToRow(entity: Entity, visible: Boolean): Row = {
@@ -54,24 +55,24 @@ object ChangeAugmenter {
     var lon: BigDecimal = null
     var nds: Array[Row] = Array.empty[Row]
     var members: Array[Row] = Array.empty[Row]
-    var typeString: String = null
+    var tipe: String = null
 
     entity.getType match {
       case EntityType.Node =>
         val node = entity.asInstanceOf[Node]
-        typeString = "node"
+        tipe = "node"
         lat = BigDecimal(node.getLatitude)
         lon = BigDecimal(node.getLongitude)
       case EntityType.Way =>
         val way = entity.asInstanceOf[Way]
-        typeString = "way"
+        tipe = "way"
         nds = way.getWayNodes.toArray.map({ wayNode => Row(wayNode.asInstanceOf[WayNode].getNodeId) })
       case EntityType.Relation =>
         val relation = entity.asInstanceOf[Relation]
-        typeString = "relation"
+        tipe = "relation"
         members = relation.getMembers.toArray.map({ relationMember =>
           val rm = relationMember.asInstanceOf[RelationMember]
-          val typeString2 = rm.getMemberType match {
+          val tipe2 = rm.getMemberType match {
             case EntityType.Node => "node"
             case EntityType.Way => "way"
             case EntityType.Relation => "relation"
@@ -79,12 +80,14 @@ object ChangeAugmenter {
           }
           val ref = rm.getMemberId
           val role = rm.getMemberRole
-          Row(typeString2, ref, role)
+          Row(tipe2, ref, role)
         })
       case _ => throw new Exception
     }
 
-    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    val p = Common.partitionNumberFn(id, tipe)
+
+    Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
   }
 
 }
@@ -123,7 +126,7 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     val index = Common.transitiveClosure(osm, Some(spark.table("index")))
 
     Common.saveBulk(osm.repartition(1), "osm_updates", "overwrite")
-    Common.saveIndex(index.repartition(1), "index_updates", "append")
+    Common.saveIndex(index.repartition(1), "index_updates", "overwrite")
   }
 
   def close(): Unit = {

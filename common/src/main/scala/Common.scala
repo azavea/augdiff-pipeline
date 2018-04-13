@@ -28,9 +28,11 @@ object Common {
       .getOrCreate
   }
 
+  private val bits = 12
+
   def partitionNumberFn(id: Long, tipe: String): Long = {
     var a = id
-    while (a > ((1L)<<(12-1))) {
+    while (a > ((1L)<<(bits-1))) {
       a = a/ 10
     }
     val b = tipe match {
@@ -55,6 +57,7 @@ object Common {
     StructField("ref", LongType, true),
     StructField("role", StringType, true))))
   val osmSchema = StructType(List(
+    StructField("p", LongType, true),
     StructField("id", LongType, true),
     StructField("type", StringType, true),
     StructField("tags", MapType(StringType, StringType), true),
@@ -70,6 +73,7 @@ object Common {
     StructField("visible", BooleanType, true)))
 
   val osmColumns: List[Column] = List(
+    col("p"),
     col("id"),
     col("type"),
     col("tags"),
@@ -107,10 +111,11 @@ object Common {
   def saveBulk(bulk: DataFrame, tableName: String, mode: String): Unit = {
     logger.info(s"Writing bulk")
     bulk
+      .orderBy("p", "id", "type")
       .write
       .mode(mode)
       .format("orc")
-      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
+      .partitionBy("p")
       .saveAsTable(tableName)
   }
 

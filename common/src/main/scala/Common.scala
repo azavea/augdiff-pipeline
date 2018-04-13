@@ -174,7 +174,7 @@ object Common {
     } while(keepGoing)
 
     // Return index
-    indexUpdates
+    indexUpdates.drop("iteration")
   }
 
 }

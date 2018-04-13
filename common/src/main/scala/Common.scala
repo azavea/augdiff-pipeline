@@ -67,8 +67,11 @@ object Common {
     col("version"),
     col("visible"))
 
-  val edgeColumns: List[Column] = List(col("a"), col("instant"), col("b"))
-  val edgeColumnsPlus: List[Column] = edgeColumns ++ List(col("iteration"))
+  val edgeColumns: List[Column] = List(
+    col("a"),
+    col("instant"),
+    col("b"),
+    col("iteration"))
 
   private val logger = {
     val logger = Logger.getLogger(Common.getClass)
@@ -113,7 +116,8 @@ object Common {
         .select(
           col("a"),
           col("instant"),
-          struct(col("nds.ref").as("id"), lit("node").as("type")).as("b"))
+          struct(col("nds.ref").as("id"), lit("node").as("type")).as("b"),
+          lit(0L).as("iteration"))
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
@@ -124,16 +128,12 @@ object Common {
         .select(
           col("a"),
           col("instant"),
-          struct(col("members.ref").as("id"), col("members.type").as("type")).as("b"))
+          struct(col("members.ref").as("id"), col("members.type").as("type")).as("b"),
+          lit(0L).as("iteration"))
     val halfEdges = halfEdgesFromNodes.union(halfEdgesFromRelations)
 
     // Return new edges
     halfEdges
-      // .union(halfEdges
-      //   .select(
-      //     col("b").as("a"),
-      //     col("instant"),
-      //     col("a").as("b")))
   }
 
   def transitiveStep(oldEdges: DataFrame, newEdges: DataFrame, iteration: Long): DataFrame = {
@@ -159,24 +159,27 @@ object Common {
   def transitiveClosure(rows: DataFrame, oldEdgesOption: Option[DataFrame]): DataFrame = {
     logger.info(s"Transitive closure iteration 0")
 
-    val newEdges = edgesFromRows(rows)
-    newEdges.show // XXX
+    val newEdges = edgesFromRows(rows).select(edgeColumns: _*)
+    var allAdditions = newEdges
     var oldEdges = (oldEdgesOption match {
-      case Some(edges) => edges.select(edgeColumns: _*).union(newEdges.select(edgeColumns: _*))
+      case Some(edges) =>
+        edges
+          .select(edgeColumns: _*)
+          .union(newEdges)
       case None => newEdges
     })
-      .withColumn("iteration", lit(0L)) // XXX optimizer hazard??
-      .select(edgeColumnsPlus: _*)
+      .select(edgeColumns: _*)
 
     var iteration = 1L
     var keepGoing = false
     do {
-      val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumnsPlus: _*)
+      val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumns: _*)
       try {
         additions.head
         // logger.info(s"ADDITIONS: ${additions.count}")
         additions.show // XXX
-        oldEdges = oldEdges.union(additions).select(edgeColumnsPlus: _*)
+        oldEdges = oldEdges.union(additions).select(edgeColumns: _*)
+        allAdditions = allAdditions.union(additions).select(edgeColumns: _*)
         keepGoing = true
         iteration = iteration + 1L
       } catch {
@@ -184,7 +187,7 @@ object Common {
       }
     } while (keepGoing)
 
-    oldEdges
+    allAdditions
   }
 
 }

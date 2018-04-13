@@ -117,11 +117,11 @@ object Common {
   def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
     logger.info(s"Writing index")
     index
-      .orderBy("ap", "a")
+      .orderBy("bp", "b")
       .write
       .mode(mode)
       .format("orc")
-      .partitionBy("ap")
+      .partitionBy("bp")
     .saveAsTable(tableName)
   }
 
@@ -169,7 +169,8 @@ object Common {
       .as("left")
       .join(
         newEdges.as("right"),
-        ((col("left.b") === col("right.a")) && // The two edges meet
+        ((col("left.bp") === col("right.ap")) && // Use partition pruning
+         (col("left.b") === col("right.a")) && // The two edges meet
          (col("left.a.type") =!= lit("way") || col("right.b.type") =!= lit("way")) && // Do no join way to way
          (col("left.a.type") =!= lit("node") || col("right.b.type") =!= lit("node")) && // Do no join node to node
          (col("left.a") =!= col("right.b")) // Do not join something to itself

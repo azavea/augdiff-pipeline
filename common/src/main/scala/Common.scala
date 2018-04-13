@@ -110,25 +110,25 @@ object Common {
       rows
         .filter(col("type") === "way")
         .select(
-          struct(col("id").as("id"), col("type").as("type")).as("a"),
+          struct(col("id").as("id"), col("type").as("type")).as("b"),
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("nds")).as("nds"))
         .select(
-          col("a"),
+          struct(col("nds.ref").as("id"), lit("node").as("type")).as("a"),
           col("instant"),
-          struct(col("nds.ref").as("id"), lit("node").as("type")).as("b"),
+          col("b"),
           lit(0L).as("iteration"))
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
         .select(
-          struct(col("id").as("id"), col("type").as("type")).as("a"),
+          struct(col("id").as("id"), col("type").as("type")).as("b"),
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("members")).as("members"))
         .select(
-          col("a"),
+          struct(col("members.ref").as("id"), col("members.type").as("type")).as("a"),
           col("instant"),
-          struct(col("members.ref").as("id"), col("members.type").as("type")).as("b"),
+          col("b"),
           lit(0L).as("iteration"))
     val halfEdges = halfEdgesFromNodes.union(halfEdgesFromRelations)
 

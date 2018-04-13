@@ -159,7 +159,7 @@ object Common {
   def transitiveClosure(rows: DataFrame, oldEdgesOption: Option[DataFrame]): DataFrame = {
     logger.info(s"Transitive closure iteration 0")
 
-    val newEdges = edgesFromRows(rows).select(edgeColumns: _*)
+    val newEdges = edgesFromRows(rows).select(edgeColumns: _*).cache
     var allAdditions = newEdges
     var oldEdges = (oldEdgesOption match {
       case Some(edges) =>
@@ -173,7 +173,7 @@ object Common {
     var iteration = 1L
     var keepGoing = false
     do {
-      val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumns: _*)
+      val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumns: _*).cache
       try {
         additions.head
         // logger.info(s"ADDITIONS: ${additions.count}")

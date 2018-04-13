@@ -23,48 +23,7 @@ object AugmentedDiff {
   val window1 = Window.partitionBy("prior_id", "prior_type").orderBy(desc("instant"))
   val window2 = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
-  def augment(rows: DataFrame) = {
-    val index =
-      spark.table("index").select(Common.indexColumns: _*)
-        .union(spark.table("index_updates").select(Common.indexColumns: _*))
-    val osm =
-      spark.table("osm").select(Common.osmColumns: _*)
-        .union(spark.table("osm_updates").select(Common.osmColumns: _*))
-
-    val dependents = index.as("left")
-      .join(
-        rows,
-        ((col("prior_id") === col("id")) &&
-         (col("prior_type") === col("type"))),
-        "left_semi")
-      .withColumn("rank", rank().over(window1))
-      .filter(col("rank") === 1)
-      .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
-      .union(rows.select(col("id"), col("type"), Common.getInstant(col("timestamp")).as("instant")))
-      .distinct // XXX
-      .select(col("id"), col("type"), col("instant"))
-    val priors = index.as("left")
-      .join(
-        dependents.as("right"),
-        ((col("left.dependent_id") === col("right.id")) &&
-         (col("left.dependent_type") === col("right.type"))),
-        "left_semi")
-      .withColumn("rank", rank().over(window1))
-      .filter(col("rank") === 1)
-      .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
-      .distinct // XXX
-      .select(col("id"), col("type"), col("instant"))
-    osm.as("left")
-      .join(
-        dependents.union(priors).as("right"),
-        ((col("left.id") === col("right.id")) &&
-         (col("left.type") === col("right.type")) &&
-         Common.getInstant(col("left.timestamp")) >= (col("right.instant"))),
-        "left_semi")
-      .withColumn("rank", rank().over(window2))
-      .filter(col("rank") === 1)
-      .drop("rank")
-  }
+  def augment(rows: DataFrame) = ???
 
   def main(args: Array[String]): Unit = {
 

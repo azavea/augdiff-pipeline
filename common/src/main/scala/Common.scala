@@ -28,6 +28,8 @@ object Common {
       .getOrCreate
   }
 
+  val larger = udf({ (x: Long, y: Long) => math.max(x,y) })
+
   val getInstant = udf({ (ts: java.sql.Timestamp) => ts.getTime })
 
   val ndsSchema = ArrayType(StructType(List(StructField("ref", LongType, true))))
@@ -65,13 +67,8 @@ object Common {
     col("version"),
     col("visible"))
 
-  val indexColumns: List[Column] = List(
-    col("prior_id"),
-    col("prior_type"),
-    col("instant"),
-    col("dependent_id"),
-    col("dependent_type"))
-  val indexColumns2: List[Column] = indexColumns ++ List(col("iteration"))
+  val edgeColumns: List[Column] = List(col("a"), col("instant"), col("b"))
+  val edgeColumnsPlus: List[Column] = edgeColumns ++ List(col("iteration"))
 
   private val logger = {
     val logger = Logger.getLogger(Common.getClass)
@@ -101,80 +98,93 @@ object Common {
       .mode(mode)
       .format("orc")
       .sortBy("prior_id", "prior_type", "instant").bucketBy(1, "prior_id", "prior_type")
-      .saveAsTable(tableName)
+      .partitionBy("x")
+    .saveAsTable(tableName)
   }
 
-  def transitiveClosure(osm: DataFrame, existingIndex: Option[DataFrame]): DataFrame = {
-    // Beginnings of transitive chains
-    val nodeToWays = osm
-      .filter(col("type") === "way")
-      .select(
-      explode(col("nds.ref")).as("prior_id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("dependent_id"),
-        col("type").as("dependent_type"))
-      .withColumn("prior_type", lit("node"))
-    val xToRelations = osm
-      .filter(col("type") === "relation")
-      .select(
-      explode(col("members")).as("prior"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("dependent_id"),
-        col("type").as("dependent_type"))
-      .withColumn("prior_id", col("prior.ref"))
-      .withColumn("prior_type", col("prior.type"))
-      .drop("prior")
-
-    // Compute transitive chains
-    var indexUpdates = nodeToWays.select(Common.indexColumns: _*)
-      .union(xToRelations.select(Common.indexColumns: _*))
-      .withColumn("iteration", lit(0L))
-      .distinct // XXX
-      .cache
-    val index: DataFrame = existingIndex match {
-      case Some(existingIndex) =>
-        existingIndex.select(Common.indexColumns: _*)
-          .union(indexUpdates.select(Common.indexColumns: _*))
-      case None => indexUpdates
-    }
-    var i: Long = 1; var keepGoing = true
-    do {
-      logger.info(s"Transitive closure iteration $i")
-      val additions = index.as("left") // somewhat overkill
-        .join(
-          indexUpdates.filter(col("iteration") === (i-1)).as("right"),
-          ((col("left.dependent_id") === col("right.prior_id")) &&
-           (col("left.dependent_type") === col("right.prior_type")) &&
-           (col("left.instant") <= col("right.instant"))), // XXX <=
-          "inner")
+  def edgesFromRows(rows: DataFrame): DataFrame = {
+    val halfEdgesFromNodes =
+      rows
+        .filter(col("type") === "way")
         .select(
-          col("left.prior_id").as("prior_id"),
-          col("left.prior_type").as("prior_type"),
-          col("right.dependent_id").as("dependent_id"),
-          col("right.dependent_type").as("dependent_type"),
-          col("left.instant").as("instant"),  // XXX instant?
-          lit(i).as("iteration"))
-        .filter(!(col("prior_id") === col("dependent_id") && col("prior_type") === col("dependent_type")))
-        .cache
+          struct(col("id").as("id"), col("type").as("type")).as("a"),
+          Common.getInstant(col("timestamp")).as("instant"),
+          explode(col("nds")).as("nds"))
+        .select(
+          col("a"),
+          col("instant"),
+          struct(col("nds.ref").as("id"), lit("node").as("type")).as("b"))
+    val halfEdgesFromRelations =
+      rows
+        .filter(col("type") === "relation")
+        .select(
+          struct(col("id").as("id"), col("type").as("type")).as("a"),
+          Common.getInstant(col("timestamp")).as("instant"),
+          explode(col("members")).as("members"))
+        .select(
+          col("a"),
+          col("instant"),
+          struct(col("members.ref").as("id"), col("members.type").as("type")).as("b"))
+    val halfEdges = halfEdgesFromNodes.union(halfEdgesFromRelations)
+
+    // Return new edges
+    halfEdges
+      // .union(halfEdges
+      //   .select(
+      //     col("b").as("a"),
+      //     col("instant"),
+      //     col("a").as("b")))
+  }
+
+  def transitiveStep(oldEdges: DataFrame, newEdges: DataFrame, iteration: Long): DataFrame = {
+    logger.info(s"Transitive closure iteration $iteration")
+    oldEdges
+      .filter(col("iteration") === iteration-1)
+      .as("left")
+      .join(
+        newEdges.as("right"),
+        ((col("left.b") === col("right.a")) && // The two edges meet
+         (col("left.a.type") =!= lit("way") || col("right.b.type") =!= lit("way")) && // Do no join way to way
+         (col("left.a.type") =!= lit("node") || col("right.b.type") =!= lit("node")) && // Do no join node to node
+         (col("left.a") =!= col("right.b")) // Do not join something to itself
+        ),
+        "inner")
+      .select(
+        col("left.a").as("a"),
+        Common.larger(col("left.instant"), col("right.instant")).as("instant"),
+        col("right.b").as("b"),
+        lit(iteration).as("iteration"))
+  }
+
+  def transitiveClosure(rows: DataFrame, oldEdgesOption: Option[DataFrame]): DataFrame = {
+    logger.info(s"Transitive closure iteration 0")
+
+    val newEdges = edgesFromRows(rows)
+    newEdges.show // XXX
+    var oldEdges = (oldEdgesOption match {
+      case Some(edges) => edges.select(edgeColumns: _*).union(newEdges.select(edgeColumns: _*))
+      case None => newEdges
+    })
+      .withColumn("iteration", lit(0L)) // XXX optimizer hazard??
+      .select(edgeColumnsPlus: _*)
+
+    var iteration = 1L
+    var keepGoing = false
+    do {
+      val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumnsPlus: _*)
       try {
         additions.head
+        // logger.info(s"ADDITIONS: ${additions.count}")
+        additions.show // XXX
+        oldEdges = oldEdges.union(additions).select(edgeColumnsPlus: _*)
         keepGoing = true
+        iteration = iteration + 1L
       } catch {
         case e: Exception => keepGoing = false
       }
-      val oldIndexUpdates = indexUpdates
-      indexUpdates =
-        indexUpdates.select(Common.indexColumns2: _*)
-          .union(additions.select(Common.indexColumns2: _*))
-          .distinct // XXX
-          .cache
-      oldIndexUpdates.unpersist
-      additions.unpersist
-      i=i+1
-    } while(keepGoing)
+    } while (keepGoing)
 
-    // Return index
-    indexUpdates.drop("iteration")
+    oldEdges
   }
 
 }

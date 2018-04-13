@@ -71,6 +71,6 @@ functionality will be configured to work against the external metastore
 From inside of the container, hive can be interacted with by e.g. typing
 ```bash
 /opt/start-hdfs.sh
-spark-shell --conf spark.sql.warehouse.dir=file:///tmp --conf spark.hadoop.hive.metastore.warehouse.dir=file:///tmp --conf spark.jars=file:///usr/share/java/postgresql-jdbc4.jar
+spark-shell --conf spark.sql.warehouse.dir=file:///tmp --conf spark.jars=file:///usr/share/java/postgresql-jdbc4.jar
 ```
 where the first line starts HDFS and the second line starts a `spark-shell` capabile of interacting with hive.

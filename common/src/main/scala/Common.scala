@@ -28,6 +28,23 @@ object Common {
       .getOrCreate
   }
 
+  def partitionNumberFn(id: Long, tipe: String): Long = {
+    var a = id
+    while (a > ((1L)<<(12-1))) {
+      a = a/ 10
+    }
+    val b = tipe match {
+      case "node" => 0L
+      case "way" => 1L
+      case "relation" => 2L
+    }
+    a ^ b
+  }
+
+  val partitionNumberUdf = udf({ (id: Long, tipe: String) =>
+    partitionNumberFn(id, tipe)
+  })
+
   val larger = udf({ (x: Long, y: Long) => math.max(x,y) })
 
   val getInstant = udf({ (ts: java.sql.Timestamp) => ts.getTime })
@@ -68,10 +85,13 @@ object Common {
     col("visible"))
 
   val edgeColumns: List[Column] = List(
+    col("ap"),
     col("a"),
     col("instant"),
+    col("bp"),
     col("b"),
-    col("iteration"))
+    col("iteration"),
+    col("extra"))
 
   private val logger = {
     val logger = Logger.getLogger(Common.getClass)
@@ -97,11 +117,11 @@ object Common {
   def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
     logger.info(s"Writing index")
     index
+      .orderBy("ap", "a")
       .write
       .mode(mode)
       .format("orc")
-      .sortBy("prior_id", "prior_type", "instant").bucketBy(1, "prior_id", "prior_type")
-      .partitionBy("x")
+      .partitionBy("ap")
     .saveAsTable(tableName)
   }
 
@@ -114,10 +134,13 @@ object Common {
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("nds")).as("nds"))
         .select(
+          partitionNumberUdf(col("nds.ref"), lit("node")).as("ap"),
           struct(col("nds.ref").as("id"), lit("node").as("type")).as("a"),
           col("instant"),
+          partitionNumberUdf(col("b.id"), col("b.type")).as("bp"),
           col("b"),
-          lit(0L).as("iteration"))
+          lit(0L).as("iteration"),
+          lit(false).as("extra"))
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
@@ -126,10 +149,13 @@ object Common {
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("members")).as("members"))
         .select(
+          partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"),
           struct(col("members.ref").as("id"), col("members.type").as("type")).as("a"),
           col("instant"),
+          partitionNumberUdf(col("b.id"), col("b.type")).as("bp"),
           col("b"),
-          lit(0L).as("iteration"))
+          lit(0L).as("iteration"),
+          lit(false).as("extra"))
     val halfEdges = halfEdgesFromNodes.union(halfEdgesFromRelations)
 
     // Return new edges
@@ -139,7 +165,7 @@ object Common {
   def transitiveStep(oldEdges: DataFrame, newEdges: DataFrame, iteration: Long): DataFrame = {
     logger.info(s"Transitive closure iteration $iteration")
     oldEdges
-      .filter(col("iteration") === iteration-1)
+      .filter((col("iteration") === iteration-1) && (col("extra") === false))
       .as("left")
       .join(
         newEdges.as("right"),
@@ -150,16 +176,44 @@ object Common {
         ),
         "inner")
       .select(
+        col("left.ap").as("ap"),
         col("left.a").as("a"),
         Common.larger(col("left.instant"), col("right.instant")).as("instant"),
+        col("right.bp").as("bp"),
         col("right.b").as("b"),
-        lit(iteration).as("iteration"))
+        lit(iteration).as("iteration"),
+        lit(false).as("extra"))
+  }
+
+  def reset(edges: DataFrame): DataFrame = { // XXX optimization barrier question
+    edges
+      .select(
+        col("ap"),
+        col("a"),
+        col("instant"),
+        col("bp"),
+        col("b"),
+        lit(0L).as("iteration"),
+        col("extra"))
+  }
+
+  def mirror(edges: DataFrame): DataFrame = {
+    edges
+      .select(
+        col("bp").as("ap"),
+        col("b").as("a"),
+        col("instant"),
+        col("ap").as("bp"),
+        col("a").as("b"),
+        lit(0L).as("iteration"),
+        lit(true).as("extra"))
   }
 
   def transitiveClosure(rows: DataFrame, oldEdgesOption: Option[DataFrame]): DataFrame = {
-    logger.info(s"Transitive closure iteration 0")
-
     val newEdges = edgesFromRows(rows).select(edgeColumns: _*).cache
+    logger.info(s"Transitive closure iteration 0")
+    // logger.info(s"Additions: ${newEdges.count}")
+
     var allAdditions = newEdges
     var oldEdges = (oldEdgesOption match {
       case Some(edges) =>
@@ -169,15 +223,14 @@ object Common {
       case None => newEdges
     })
       .select(edgeColumns: _*)
-
     var iteration = 1L
     var keepGoing = false
+
     do {
       val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumns: _*).cache
       try {
         additions.head
-        // logger.info(s"ADDITIONS: ${additions.count}")
-        additions.show // XXX
+        // logger.info(s"Additions: ${additions.count}")
         oldEdges = oldEdges.union(additions).select(edgeColumns: _*)
         allAdditions = allAdditions.union(additions).select(edgeColumns: _*)
         keepGoing = true
@@ -187,7 +240,8 @@ object Common {
       }
     } while (keepGoing)
 
-    allAdditions
+    reset(allAdditions).select(edgeColumns: _*)
+      .union(mirror(allAdditions).select(edgeColumns: _*))
   }
 
 }

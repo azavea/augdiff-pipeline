@@ -18,11 +18,8 @@ object Indexer {
     val osm = spark.read.orc(args(0))
     val index = Common.transitiveClosure(osm, None)
 
-    index.printSchema
-    index.show
-
     // Common.saveBulk(osm, "osm", "overwrite")
-    // Common.saveIndex(index, "index", "overwrite")
+    Common.saveIndex(index, "index", "overwrite")
   }
 
 }

@@ -18,7 +18,7 @@ import java.sql.Timestamp
 
 object ChangeAugmenter {
 
-  def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
+  def entityToLesserRow(entity: Entity, visible: Boolean): (Row, Long) = {
     val id: Long = entity.getId
     val tags = Map.empty[String,String]
     val changeset = null
@@ -36,12 +36,14 @@ object ChangeAugmenter {
       case EntityType.Relation => "relation"
       case _ => throw new Exception
     }
-    val p = Common.partitionNumberFn(id, tipe)
 
-    Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    val p = Common.partitionNumberFn(id, tipe)
+    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+
+    (row, p)
   }
 
-  def entityToRow(entity: Entity, visible: Boolean): Row = {
+  def entityToRow(entity: Entity, visible: Boolean): (Row, Long) = {
     val id: Long = entity.getId
     val tags: Map[String,String] = entity.getTags.toArray.map({ tag =>
       val t = tag.asInstanceOf[Tag]
@@ -87,8 +89,9 @@ object ChangeAugmenter {
     }
 
     val p = Common.partitionNumberFn(id, tipe)
+    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
 
-    Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    (row, p)
   }
 
 }
@@ -96,7 +99,8 @@ object ChangeAugmenter {
 class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   import ChangeAugmenter._
 
-  val ab = mutable.ArrayBuffer.empty[Row]
+  val rs = mutable.ArrayBuffer.empty[Row]
+  val ps = mutable.ArrayBuffer.empty[Long]
 
   val logger = {
     val logger = Logger.getLogger(ChangeAugmenter.getClass)
@@ -108,9 +112,13 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   def process(ct: ChangeContainer): Unit = {
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
-        ab.append(entityToRow(ct.getEntityContainer.getEntity, true))
+        val (r, p) = entityToRow(ct.getEntityContainer.getEntity, true)
+        rs.append(r)
+        ps.append(p)
       case ChangeAction.Delete =>
-        ab.append(entityToLesserRow(ct.getEntityContainer.getEntity, false))
+        val (r, p) = entityToLesserRow(ct.getEntityContainer.getEntity, false)
+        rs.append(r)
+        ps.append(p)
       case _ =>
     }
 
@@ -129,13 +137,15 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
 
     val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
     val osm = spark.createDataFrame(
-      spark.sparkContext.parallelize(ab.toList),
+      spark.sparkContext.parallelize(rs.toList),
       StructType(Common.osmSchema))
     val lastLive = osm
       .withColumn("rank", rank().over(window))
       .filter(col("rank") === 1) // Most recent version of this id×type pair
       .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
-    val index = Common.transitiveClosure(osm, Some(spark.table("index")))
+    val edgeList = Some(spark.table("index")) // XXX
+
+    val index = Common.transitiveClosure(osm, edgeList, fewRows = true)
 
     Common.saveBulk(osm.repartition(1), "osm_updates", "overwrite")
     Common.saveIndex(index.repartition(1), "index_updates", "overwrite")

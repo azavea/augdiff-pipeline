@@ -18,7 +18,8 @@ object Indexer {
     val osm = spark
       .read.orc(args(0))
       .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
-    val index = Common.transitiveClosure(osm, None)
+      .select(Common.osmColumns: _*)
+    val index = Common.transitiveClosure(osm, None, fewRows = false)
 
     Common.saveBulk(osm, "osm", "overwrite")
     Common.saveIndex(index, "index", "overwrite")

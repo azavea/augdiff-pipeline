@@ -167,19 +167,20 @@ object Common {
     halfEdges
   }
 
-  def transitiveStep(oldEdges: DataFrame, newEdges: DataFrame, iteration: Long): DataFrame = {
-    logger.info(s"Transitive closure iteration $iteration")
-    oldEdges
+  def transitiveStepSlow(
+    leftEdges: DataFrame, rightEdges: DataFrame, iteration: Long
+  ): DataFrame = {
+    logger.info(s"Transitive closure iteration $iteration (slow)")
+    leftEdges
       .filter((col("iteration") === iteration-1) && (col("extra") === false))
       .as("left")
       .join(
-        newEdges.as("right"),
-        ((col("left.bp") === col("right.ap")) && // Use partition pruning
+        rightEdges.as("right"),
+        ((col("left.bp") === col("right.ap")) && // Try to use partition pruning
          (col("left.b") === col("right.a")) && // The two edges meet
          (col("left.a.type") =!= lit("way") || col("right.b.type") =!= lit("way")) && // Do no join way to way
          (col("left.a.type") =!= lit("node") || col("right.b.type") =!= lit("node")) && // Do no join node to node
-         (col("left.a") =!= col("right.b")) // Do not join something to itself
-        ),
+         (col("left.a") =!= col("right.b"))), // Do not join something to itself
         "inner")
       .select(
         col("left.ap").as("ap"),
@@ -189,6 +190,64 @@ object Common {
         col("right.b").as("b"),
         lit(iteration).as("iteration"),
         lit(false).as("extra"))
+  }
+
+  def transitiveStepSomewhatLessSlow(
+    leftEdges: DataFrame,
+    rightEdges: Map[(Long, String), Array[Row]],
+    partitions: Array[Long],
+    iteration: Long
+  ): DataFrame = {
+    logger.info(s"Transitive closure iteration $iteration (somewhat less slow)")
+    val schema = leftEdges.schema
+    val rdd = leftEdges
+      // .filter(col("bp").isin(partitions: _*)) // Use partition pruning
+      .filter(col("bp").isin((partitions.take(175)): _*)) // XXX work around limit w/ union
+      .filter((col("iteration") === iteration-1) && (col("extra") === false))
+      .select((edgeColumns.take(5)): _*).rdd
+      .flatMap({ row1 => // Manual inner join
+        val leftAp = row1.getLong(0)
+        val leftA = row1.getStruct(1)
+        val leftAid = leftA.getLong(0)
+        val leftAtype = leftA.getString(1)
+        val leftInstant = row1.getLong(2)
+        val leftBp = row1.getLong(3)
+        val leftB = row1.getStruct(4)
+        val leftBid = leftB.getLong(0)
+        val leftBtype = leftB.getString(1)
+        val key = (leftB.getLong(0), leftB.getString(1))
+
+        rightEdges.getOrElse(key, Array.empty[Row])
+          .flatMap({ row2 =>
+            val rightAp = row2.getLong(0)
+            val rightA = row2.getStruct(1)
+            val rightAid = rightA.getLong(0)
+            val rightAtype = rightA.getString(1)
+            val rightInstant = row2.getLong(2)
+            val rightBp = row2.getLong(3)
+            val rightB = row2.getStruct(4)
+            val rightBid = rightB.getLong(0)
+            val rightBtype = rightB.getString(1)
+
+            if (leftBid != rightAid || leftBtype != rightAtype) None // The two edges must meet
+            else if (leftAtype == "way" && rightBtype == "way") None // Do not join way to way
+            else if (leftAtype == "node" && rightBtype == "node") None // Do not join node to node
+            else if (leftAid == rightBid && leftAtype == rightBtype) None // Do not join thing to itself
+            else {
+              Some(Row(
+                leftAp,
+                leftA,
+                math.max(leftInstant, rightInstant),
+                rightBp,
+                rightB,
+                iteration,
+                false
+              ))
+            }
+          })
+      })
+
+    leftEdges.sparkSession.createDataFrame(rdd, schema)
   }
 
   def reset(edges: DataFrame): DataFrame = { // XXX optimization barrier question
@@ -215,39 +274,60 @@ object Common {
         lit(true).as("extra"))
   }
 
-  def transitiveClosure(rows: DataFrame, oldEdgesOption: Option[DataFrame]): DataFrame = {
-    val newEdges = edgesFromRows(rows).select(edgeColumns: _*).cache
-    logger.info(s"Transitive closure iteration 0")
-    // logger.info(s"Additions: ${newEdges.count}")
+  def transitiveClosure(
+    rows: DataFrame,
+    previousEdgesOption: Option[DataFrame],
+    fewRows: Boolean = false
+  ): DataFrame = {
+    logger.info(s"Transitive closure initial iteration")
 
-    var allAdditions = newEdges
-    var oldEdges = (oldEdgesOption match {
+    val initialEdges = edgesFromRows(rows).select(edgeColumns: _*)
+    val initialEdgesMap: Map[(Long, String), Array[Row]] =
+      if (fewRows == false) null
+      else initialEdges.collect.groupBy({ row => (row.getStruct(1).getLong(0), row.getStruct(1).getString(1)) })
+    val partitionArray: Array[Long] =
+      if (fewRows == false) null
+      else initialEdges.collect.map({ row => row.getLong(0) }).distinct
+
+    var additionalEdges = initialEdges
+    var previousEdges = (previousEdgesOption match {
       case Some(edges) =>
         edges
           .select(edgeColumns: _*)
-          .union(newEdges)
-      case None => newEdges
+          .union(initialEdges)
+      case None => initialEdges
     })
       .select(edgeColumns: _*)
     var iteration = 1L
     var keepGoing = false
 
     do {
-      val additions = transitiveStep(oldEdges, newEdges, iteration).select(edgeColumns: _*).cache
+      val newEdges =
+        if (fewRows == false)
+          transitiveStepSlow(previousEdges, initialEdges, iteration)
+            .select(edgeColumns: _*)
+        else
+          transitiveStepSomewhatLessSlow(
+            previousEdges,
+            initialEdgesMap,
+            partitionArray,
+            iteration
+          )
+            .select(edgeColumns: _*)
+
       try {
-        additions.head
-        // logger.info(s"Additions: ${additions.count}")
-        oldEdges = oldEdges.union(additions).select(edgeColumns: _*)
-        allAdditions = allAdditions.union(additions).select(edgeColumns: _*)
-        keepGoing = true
+        newEdges.head
+        previousEdges = previousEdges.union(newEdges).select(edgeColumns: _*)
+        additionalEdges = additionalEdges.union(newEdges).select(edgeColumns: _*)
         iteration = iteration + 1L
+        keepGoing = (iteration < 7)
       } catch {
         case e: Exception => keepGoing = false
       }
     } while (keepGoing)
 
-    reset(allAdditions).select(edgeColumns: _*)
-      .union(mirror(allAdditions).select(edgeColumns: _*))
+    reset(additionalEdges).select(edgeColumns: _*)
+      .union(mirror(additionalEdges).select(edgeColumns: _*))
   }
 
 }

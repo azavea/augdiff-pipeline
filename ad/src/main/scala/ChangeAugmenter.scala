@@ -1,5 +1,6 @@
 package osmdiff
 
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
@@ -97,6 +98,13 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
 
   val ab = mutable.ArrayBuffer.empty[Row]
 
+  val logger = {
+    val logger = Logger.getLogger(ChangeAugmenter.getClass)
+    logger.setLevel(Level.INFO)
+    logger
+  }
+
+
   def process(ct: ChangeContainer): Unit = {
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
@@ -109,15 +117,15 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   }
 
   def initialize(m: java.util.Map[String,Object]): Unit = {
-    println(s"initialize: ${m.entrySet.toArray.toList}")
+    logger.info(s"initialize: ${m.entrySet.toArray.toList}")
   }
 
   def complete(): Unit = {
-    println("complete")
+    logger.info("complete")
   }
 
   def close(): Unit = {
-    println("close")
+    logger.info("close")
 
     val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
     val osm = spark.createDataFrame(

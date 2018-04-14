@@ -114,6 +114,10 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
 
   def complete(): Unit = {
     println("complete")
+  }
+
+  def close(): Unit = {
+    println("close")
 
     val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
     val osm = spark.createDataFrame(
@@ -127,10 +131,6 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
 
     Common.saveBulk(osm.repartition(1), "osm_updates", "overwrite")
     Common.saveIndex(index.repartition(1), "index_updates", "overwrite")
-  }
-
-  def close(): Unit = {
-    println("close")
   }
 
 }

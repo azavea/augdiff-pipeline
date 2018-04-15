@@ -145,7 +145,7 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
       .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
     val edgeList = Some(spark.table("index")) // XXX
 
-    val index = Common.transitiveClosure(osm, edgeList, fewRows = true)
+    val index = ComputeIndex(osm, edgeList)
 
     Common.saveBulk(osm.repartition(1), "osm_updates", "overwrite")
     Common.saveIndex(index.repartition(1), "index_updates", "overwrite")

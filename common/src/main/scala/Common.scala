@@ -16,6 +16,7 @@ object Common {
       .setIfMissing("spark.executor.heartbeatInterval", "30")
       .setIfMissing("spark.hadoop.hive.execution.engine", "spark")
       .setIfMissing("spark.master", "local[*]")
+      .setIfMissing("spark.ui.enabled", "true")
       .set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
       .set("spark.hadoop.hive.vectorized.execution.enabled", "true")
       .set("spark.hadoop.hive.vectorized.execution.reduce.enabled", "true")
@@ -89,11 +90,9 @@ object Common {
     col("visible"))
 
   val edgeColumns: List[Column] = List(
-    col("ap"),
-    col("a"),
+    col("ap"), col("aid"), col("atype"),
     col("instant"),
-    col("bp"),
-    col("b"),
+    col("bp"), col("bid"), col("btype"),
     col("iteration"),
     col("extra"))
 
@@ -122,7 +121,7 @@ object Common {
   def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
     logger.info(s"Writing index")
     index
-      .orderBy("bp", "b")
+      .orderBy("bp", "bid", "btype")
       .write
       .mode(mode)
       .format("orc")
@@ -135,30 +134,36 @@ object Common {
       rows
         .filter(col("type") === "way")
         .select(
-          struct(col("id").as("id"), col("type").as("type")).as("b"),
+          col("id").as("bid"),
+          col("type").as("btype"),
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("nds")).as("nds"))
         .select(
           partitionNumberUdf(col("nds.ref"), lit("node")).as("ap"),
-          struct(col("nds.ref").as("id"), lit("node").as("type")).as("a"),
+          col("nds.ref").as("aid"),
+          lit("node").as("atype"),
           col("instant"),
-          partitionNumberUdf(col("b.id"), col("b.type")).as("bp"),
-          col("b"),
+          partitionNumberUdf(col("bid"), col("btype")).as("bp"),
+          col("bid"),
+          col("btype"),
           lit(0L).as("iteration"),
           lit(false).as("extra"))
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
         .select(
-          struct(col("id").as("id"), col("type").as("type")).as("b"),
+          col("id").as("bid"),
+          col("type").as("btype"),
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("members")).as("members"))
         .select(
           partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"),
-          struct(col("members.ref").as("id"), col("members.type").as("type")).as("a"),
+          col("members.ref").as("aid"),
+          col("members.type").as("atype"),
           col("instant"),
-          partitionNumberUdf(col("b.id"), col("b.type")).as("bp"),
-          col("b"),
+          partitionNumberUdf(col("bid"), col("btype")).as("bp"),
+          col("bid"),
+          col("btype"),
           lit(0L).as("iteration"),
           lit(false).as("extra"))
     val halfEdges = halfEdgesFromNodes.union(halfEdgesFromRelations)
@@ -167,167 +172,61 @@ object Common {
     halfEdges
   }
 
-  def transitiveStepSlow(
-    leftEdges: DataFrame, rightEdges: DataFrame, iteration: Long
-  ): DataFrame = {
-    logger.info(s"Transitive closure iteration $iteration (slow)")
-    leftEdges
-      .filter((col("iteration") === iteration-1) && (col("extra") === false))
-      .as("left")
-      .join(
-        rightEdges.as("right"),
-        ((col("left.bp") === col("right.ap")) && // Try to use partition pruning
-         (col("left.b") === col("right.a")) && // The two edges meet
-         (col("left.a.type") =!= lit("way") || col("right.b.type") =!= lit("way")) && // Do no join way to way
-         (col("left.a.type") =!= lit("node") || col("right.b.type") =!= lit("node")) && // Do no join node to node
-         (col("left.a") =!= col("right.b"))), // Do not join something to itself
-        "inner")
-      .select(
-        col("left.ap").as("ap"),
-        col("left.a").as("a"),
-        Common.larger(col("left.instant"), col("right.instant")).as("instant"),
-        col("right.bp").as("bp"),
-        col("right.b").as("b"),
-        lit(iteration).as("iteration"),
-        lit(false).as("extra"))
-  }
+  // def transitiveStepSomewhatLessSlow(
+  //   leftEdges: DataFrame,
+  //   rightEdges: Map[(Long, String), Array[Row]],
+  //   partitions: Array[Long],
+  //   iteration: Long
+  // ): DataFrame = {
+  //   logger.info(s"Transitive closure iteration $iteration (somewhat less slow)")
+  //   val schema = leftEdges.schema
+  //   val rdd = leftEdges
+  //     // .filter(col("bp").isin(partitions: _*)) // Use partition pruning
+  //     .filter(col("bp").isin((partitions.take(175)): _*)) // XXX work around limit w/ union
+  //     .filter((col("iteration") === iteration-1) && (col("extra") === false))
+  //     .select((edgeColumns.take(5)): _*).rdd
+  //     .flatMap({ row1 => // Manual inner join
+  //       val leftAp = row1.getLong(0)
+  //       val leftA = row1.getStruct(1)
+  //       val leftAid = leftA.getLong(0)
+  //       val leftAtype = leftA.getString(1)
+  //       val leftInstant = row1.getLong(2)
+  //       val leftBp = row1.getLong(3)
+  //       val leftB = row1.getStruct(4)
+  //       val leftBid = leftB.getLong(0)
+  //       val leftBtype = leftB.getString(1)
+  //       val key = (leftB.getLong(0), leftB.getString(1))
 
-  def transitiveStepSomewhatLessSlow(
-    leftEdges: DataFrame,
-    rightEdges: Map[(Long, String), Array[Row]],
-    partitions: Array[Long],
-    iteration: Long
-  ): DataFrame = {
-    logger.info(s"Transitive closure iteration $iteration (somewhat less slow)")
-    val schema = leftEdges.schema
-    val rdd = leftEdges
-      // .filter(col("bp").isin(partitions: _*)) // Use partition pruning
-      .filter(col("bp").isin((partitions.take(175)): _*)) // XXX work around limit w/ union
-      .filter((col("iteration") === iteration-1) && (col("extra") === false))
-      .select((edgeColumns.take(5)): _*).rdd
-      .flatMap({ row1 => // Manual inner join
-        val leftAp = row1.getLong(0)
-        val leftA = row1.getStruct(1)
-        val leftAid = leftA.getLong(0)
-        val leftAtype = leftA.getString(1)
-        val leftInstant = row1.getLong(2)
-        val leftBp = row1.getLong(3)
-        val leftB = row1.getStruct(4)
-        val leftBid = leftB.getLong(0)
-        val leftBtype = leftB.getString(1)
-        val key = (leftB.getLong(0), leftB.getString(1))
+  //       rightEdges.getOrElse(key, Array.empty[Row])
+  //         .flatMap({ row2 =>
+  //           val rightAp = row2.getLong(0)
+  //           val rightA = row2.getStruct(1)
+  //           val rightAid = rightA.getLong(0)
+  //           val rightAtype = rightA.getString(1)
+  //           val rightInstant = row2.getLong(2)
+  //           val rightBp = row2.getLong(3)
+  //           val rightB = row2.getStruct(4)
+  //           val rightBid = rightB.getLong(0)
+  //           val rightBtype = rightB.getString(1)
 
-        rightEdges.getOrElse(key, Array.empty[Row])
-          .flatMap({ row2 =>
-            val rightAp = row2.getLong(0)
-            val rightA = row2.getStruct(1)
-            val rightAid = rightA.getLong(0)
-            val rightAtype = rightA.getString(1)
-            val rightInstant = row2.getLong(2)
-            val rightBp = row2.getLong(3)
-            val rightB = row2.getStruct(4)
-            val rightBid = rightB.getLong(0)
-            val rightBtype = rightB.getString(1)
+  //           if (leftBid != rightAid || leftBtype != rightAtype) None // The two edges must meet
+  //           else if (leftAtype == "way" && rightBtype == "way") None // Do not join way to way
+  //           else if (leftAtype == "node" && rightBtype == "node") None // Do not join node to node
+  //           else if (leftAid == rightBid && leftAtype == rightBtype) None // Do not join thing to itself
+  //           else {
+  //             Some(Row(
+  //               leftAp,
+  //               leftA,
+  //               math.max(leftInstant, rightInstant),
+  //               rightBp,
+  //               rightB,
+  //               iteration,
+  //               false
+  //             ))
+  //           }
+  //         })
+  //     })
 
-            if (leftBid != rightAid || leftBtype != rightAtype) None // The two edges must meet
-            else if (leftAtype == "way" && rightBtype == "way") None // Do not join way to way
-            else if (leftAtype == "node" && rightBtype == "node") None // Do not join node to node
-            else if (leftAid == rightBid && leftAtype == rightBtype) None // Do not join thing to itself
-            else {
-              Some(Row(
-                leftAp,
-                leftA,
-                math.max(leftInstant, rightInstant),
-                rightBp,
-                rightB,
-                iteration,
-                false
-              ))
-            }
-          })
-      })
-
-    leftEdges.sparkSession.createDataFrame(rdd, schema)
-  }
-
-  def reset(edges: DataFrame): DataFrame = { // XXX optimization barrier question
-    edges
-      .select(
-        col("ap"),
-        col("a"),
-        col("instant"),
-        col("bp"),
-        col("b"),
-        lit(0L).as("iteration"),
-        col("extra"))
-  }
-
-  def mirror(edges: DataFrame): DataFrame = {
-    edges
-      .select(
-        col("bp").as("ap"),
-        col("b").as("a"),
-        col("instant"),
-        col("ap").as("bp"),
-        col("a").as("b"),
-        lit(0L).as("iteration"),
-        lit(true).as("extra"))
-  }
-
-  def transitiveClosure(
-    rows: DataFrame,
-    previousEdgesOption: Option[DataFrame],
-    fewRows: Boolean = false
-  ): DataFrame = {
-    logger.info(s"Transitive closure initial iteration")
-
-    val initialEdges = edgesFromRows(rows).select(edgeColumns: _*)
-    val initialEdgesMap: Map[(Long, String), Array[Row]] =
-      if (fewRows == false) null
-      else initialEdges.collect.groupBy({ row => (row.getStruct(1).getLong(0), row.getStruct(1).getString(1)) })
-    val partitionArray: Array[Long] =
-      if (fewRows == false) null
-      else initialEdges.collect.map({ row => row.getLong(0) }).distinct
-
-    var additionalEdges = initialEdges
-    var previousEdges = (previousEdgesOption match {
-      case Some(edges) =>
-        edges
-          .select(edgeColumns: _*)
-          .union(initialEdges)
-      case None => initialEdges
-    })
-      .select(edgeColumns: _*)
-    var iteration = 1L
-    var keepGoing = false
-
-    do {
-      val newEdges =
-        if (fewRows == false)
-          transitiveStepSlow(previousEdges, initialEdges, iteration)
-            .select(edgeColumns: _*)
-        else
-          transitiveStepSomewhatLessSlow(
-            previousEdges,
-            initialEdgesMap,
-            partitionArray,
-            iteration
-          )
-            .select(edgeColumns: _*)
-
-      try {
-        newEdges.head
-        previousEdges = previousEdges.union(newEdges).select(edgeColumns: _*)
-        additionalEdges = additionalEdges.union(newEdges).select(edgeColumns: _*)
-        iteration = iteration + 1L
-        keepGoing = (iteration < 7)
-      } catch {
-        case e: Exception => keepGoing = false
-      }
-    } while (keepGoing)
-
-    reset(additionalEdges).select(edgeColumns: _*)
-      .union(mirror(additionalEdges).select(edgeColumns: _*))
-  }
-
+  //   leftEdges.sparkSession.createDataFrame(rdd, schema)
+  // }
 }

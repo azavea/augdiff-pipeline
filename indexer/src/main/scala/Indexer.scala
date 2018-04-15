@@ -19,7 +19,7 @@ object Indexer {
       .read.orc(args(0))
       .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
       .select(Common.osmColumns: _*)
-    val index = Common.transitiveClosure(osm, None, fewRows = false)
+    val index = ComputeIndex(osm, None)
 
     Common.saveBulk(osm, "osm", "overwrite")
     Common.saveIndex(index, "index", "overwrite")

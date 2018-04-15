@@ -1,11 +1,9 @@
 package osmdiff
 
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.SparkConf
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types._
+
 
 object ComputeIndex {
 
@@ -35,12 +33,51 @@ object ComputeIndex {
         lit(true).as("extra"))
   }
 
-  def transitiveStep(
+  private def edgesFromRows(rows: DataFrame): DataFrame = {
+    val halfEdgesFromNodes =
+      rows
+        .filter(col("type") === "way")
+        .select(
+          col("id").as("bid"),
+          col("type").as("btype"),
+          Common.getInstant(col("timestamp")).as("instant"),
+          explode(col("nds")).as("nds"))
+        .select(
+          Common.partitionNumberUdf(col("nds.ref"), lit("node")).as("ap"),
+          col("nds.ref").as("aid"), lit("node").as("atype"),
+          col("instant"),
+          Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
+          col("bid"), col("btype"),
+          lit(0L).as("iteration"),
+          lit(false).as("extra"))
+    val halfEdgesFromRelations =
+      rows
+        .filter(col("type") === "relation")
+        .select(
+          col("id").as("bid"),
+          col("type").as("btype"),
+          Common.getInstant(col("timestamp")).as("instant"),
+          explode(col("members")).as("members"))
+        .select(
+          Common.partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"),
+          col("members.ref").as("aid"),
+          col("members.type").as("atype"),
+          col("instant"),
+          Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
+          col("bid"),
+          col("btype"),
+          lit(0L).as("iteration"),
+          lit(false).as("extra"))
+
+    halfEdgesFromNodes.union(halfEdgesFromRelations)
+  }
+
+  private def transitiveStep(
     leftEdges: DataFrame, rightEdges: DataFrame, iteration: Long
   ): DataFrame = {
-    logger.info(s"Transitive closure iteration $iteration")
+    logger.info(s"◻ Transitive closure iteration=$iteration")
     leftEdges
-      .filter((col("iteration") === iteration-1) && (col("extra") === false))
+      .filter(col("iteration") === iteration-1)
       .as("left")
       .join(
       rightEdges.as("right"),
@@ -58,19 +95,13 @@ object ComputeIndex {
         lit(false).as("extra"))
   }
 
-  def apply(
-    rows: DataFrame,
-    previousEdgesOption: Option[DataFrame]
-  ): DataFrame = {
-    logger.info(s"Index (Spark)")
+  def apply(rows: DataFrame): DataFrame = {
+    logger.info(s"◻ Computing Index")
 
-    val initialEdges = Common.edgesFromRows(rows).select(Common.edgeColumns: _*)
+    val initialEdges = edgesFromRows(rows).select(Common.edgeColumns: _*)
 
     var additionalEdges = initialEdges
-    var previousEdges = (previousEdgesOption match {
-      case Some(edges) => edges.select(Common.edgeColumns: _*).union(initialEdges)
-      case None => initialEdges
-    }).select(Common.edgeColumns: _*)
+    var previousEdges = initialEdges
     var iteration = 1L
     var keepGoing = false
 

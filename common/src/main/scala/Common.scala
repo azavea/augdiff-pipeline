@@ -29,7 +29,7 @@ object Common {
       .getOrCreate
   }
 
-  private val bits = 12
+  private val bits = 16
 
   def partitionNumberFn(id: Long, tipe: String): Long = {
     var a = id
@@ -74,30 +74,30 @@ object Common {
     StructField("visible", BooleanType, true)))
 
   val osmColumns: List[Column] = List(
-    col("p"),
-    col("id"),
-    col("type"),
-    col("tags"),
-    col("lat"),
-    col("lon"),
-    col("nds"),
-    col("members"),
-    col("changeset"),
-    col("timestamp"),
-    col("uid"),
-    col("user"),
-    col("version"),
-    col("visible"))
+    col("p"),         /* 0 */
+    col("id"),        /* 1 */
+    col("type"),      /* 2 */
+    col("tags"),      /* 3 */
+    col("lat"),       /* 4 */
+    col("lon"),       /* 5 */
+    col("nds"),       /* 6 */
+    col("members"),   /* 7 */
+    col("changeset"), /* 8 */
+    col("timestamp"), /* 9 */
+    col("uid"),       /* 10 */
+    col("user"),      /* 11 */
+    col("version"),   /* 12 */
+    col("visible"))   /* 13 */
 
   val edgeColumns: List[Column] = List(
-    col("ap"), col("aid"), col("atype"),
-    col("instant"),
-    col("bp"), col("bid"), col("btype"),
-    col("iteration"),
-    col("extra"))
+    col("ap"), col("aid"), col("atype"), /* 0, 1, 2 */
+    col("instant"),                      /* 3 */
+    col("bp"), col("bid"), col("btype"), /* 4, 5, 6 */
+    col("iteration"),                    /* 7 */
+    col("extra"))                        /* 8 */
 
   private val logger = {
-    val logger = Logger.getLogger(Common.getClass)
+    val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
     logger
   }
@@ -129,104 +129,4 @@ object Common {
     .saveAsTable(tableName)
   }
 
-  def edgesFromRows(rows: DataFrame): DataFrame = {
-    val halfEdgesFromNodes =
-      rows
-        .filter(col("type") === "way")
-        .select(
-          col("id").as("bid"),
-          col("type").as("btype"),
-          Common.getInstant(col("timestamp")).as("instant"),
-          explode(col("nds")).as("nds"))
-        .select(
-          partitionNumberUdf(col("nds.ref"), lit("node")).as("ap"),
-          col("nds.ref").as("aid"),
-          lit("node").as("atype"),
-          col("instant"),
-          partitionNumberUdf(col("bid"), col("btype")).as("bp"),
-          col("bid"),
-          col("btype"),
-          lit(0L).as("iteration"),
-          lit(false).as("extra"))
-    val halfEdgesFromRelations =
-      rows
-        .filter(col("type") === "relation")
-        .select(
-          col("id").as("bid"),
-          col("type").as("btype"),
-          Common.getInstant(col("timestamp")).as("instant"),
-          explode(col("members")).as("members"))
-        .select(
-          partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"),
-          col("members.ref").as("aid"),
-          col("members.type").as("atype"),
-          col("instant"),
-          partitionNumberUdf(col("bid"), col("btype")).as("bp"),
-          col("bid"),
-          col("btype"),
-          lit(0L).as("iteration"),
-          lit(false).as("extra"))
-    val halfEdges = halfEdgesFromNodes.union(halfEdgesFromRelations)
-
-    // Return new edges
-    halfEdges
-  }
-
-  // def transitiveStepSomewhatLessSlow(
-  //   leftEdges: DataFrame,
-  //   rightEdges: Map[(Long, String), Array[Row]],
-  //   partitions: Array[Long],
-  //   iteration: Long
-  // ): DataFrame = {
-  //   logger.info(s"Transitive closure iteration $iteration (somewhat less slow)")
-  //   val schema = leftEdges.schema
-  //   val rdd = leftEdges
-  //     // .filter(col("bp").isin(partitions: _*)) // Use partition pruning
-  //     .filter(col("bp").isin((partitions.take(175)): _*)) // XXX work around limit w/ union
-  //     .filter((col("iteration") === iteration-1) && (col("extra") === false))
-  //     .select((edgeColumns.take(5)): _*).rdd
-  //     .flatMap({ row1 => // Manual inner join
-  //       val leftAp = row1.getLong(0)
-  //       val leftA = row1.getStruct(1)
-  //       val leftAid = leftA.getLong(0)
-  //       val leftAtype = leftA.getString(1)
-  //       val leftInstant = row1.getLong(2)
-  //       val leftBp = row1.getLong(3)
-  //       val leftB = row1.getStruct(4)
-  //       val leftBid = leftB.getLong(0)
-  //       val leftBtype = leftB.getString(1)
-  //       val key = (leftB.getLong(0), leftB.getString(1))
-
-  //       rightEdges.getOrElse(key, Array.empty[Row])
-  //         .flatMap({ row2 =>
-  //           val rightAp = row2.getLong(0)
-  //           val rightA = row2.getStruct(1)
-  //           val rightAid = rightA.getLong(0)
-  //           val rightAtype = rightA.getString(1)
-  //           val rightInstant = row2.getLong(2)
-  //           val rightBp = row2.getLong(3)
-  //           val rightB = row2.getStruct(4)
-  //           val rightBid = rightB.getLong(0)
-  //           val rightBtype = rightB.getString(1)
-
-  //           if (leftBid != rightAid || leftBtype != rightAtype) None // The two edges must meet
-  //           else if (leftAtype == "way" && rightBtype == "way") None // Do not join way to way
-  //           else if (leftAtype == "node" && rightBtype == "node") None // Do not join node to node
-  //           else if (leftAid == rightBid && leftAtype == rightBtype) None // Do not join thing to itself
-  //           else {
-  //             Some(Row(
-  //               leftAp,
-  //               leftA,
-  //               math.max(leftInstant, rightInstant),
-  //               rightBp,
-  //               rightB,
-  //               iteration,
-  //               false
-  //             ))
-  //           }
-  //         })
-  //     })
-
-  //   leftEdges.sparkSession.createDataFrame(rdd, schema)
-  // }
 }

@@ -98,24 +98,22 @@ object ComputeIndex {
   def apply(rows: DataFrame): DataFrame = {
     logger.info(s"◻ Computing Index")
 
-    val initialEdges = edgesFromRows(rows).select(Common.edgeColumns: _*)
-
-    var additionalEdges = initialEdges
-    var previousEdges = initialEdges
+    val rightEdges = edgesFromRows(rows).select(Common.edgeColumns: _*)
+    var outputEdges = rightEdges
+    var leftEdges = rightEdges
     var iteration = 1L
     var keepGoing = false
 
     do {
-      val newEdges = transitiveStep(previousEdges, initialEdges, iteration)
-        .select(Common.edgeColumns: _*)
-      previousEdges = previousEdges.union(newEdges).select(Common.edgeColumns: _*)
-      additionalEdges = additionalEdges.union(newEdges).select(Common.edgeColumns: _*)
+      val newEdges = transitiveStep(leftEdges, rightEdges, iteration).select(Common.edgeColumns: _*)
+      leftEdges = leftEdges.union(newEdges).select(Common.edgeColumns: _*)
+      outputEdges = outputEdges.union(newEdges).select(Common.edgeColumns: _*)
       iteration = iteration + 1L
       keepGoing = (iteration < 7) && (!newEdges.rdd.isEmpty)
     } while (keepGoing)
 
-    reset(additionalEdges).select(Common.edgeColumns: _*)
-      .union(mirror(additionalEdges).select(Common.edgeColumns: _*))
+    reset(outputEdges).select(Common.edgeColumns: _*)
+      .union(mirror(outputEdges).select(Common.edgeColumns: _*))
   }
 
 }

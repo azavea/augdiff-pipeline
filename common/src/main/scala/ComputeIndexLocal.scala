@@ -20,10 +20,10 @@ object ComputeIndexLocal {
       rows
         .filter({ r => r.getString(2) /* type */ == "way" })
         .flatMap({ r =>
-          val bid = r.getLong(1) /* id */
-          val btype = r.getString(2) /* type */
+          val bid = r.getLong(1)                                  /* id */
+          val btype = r.getString(2)                              /* type */
           val bp = Common.partitionNumberFn(bid, btype)
-          val instant = r.getTimestamp(9).getTime /* timestamp */
+          val instant = r.getTimestamp(9).getTime                 /* timestamp */
           val nds: Array[Row] = r.get(6).asInstanceOf[Array[Row]] /* nds */
 
           nds.flatMap({ nd =>
@@ -51,10 +51,10 @@ object ComputeIndexLocal {
       rows
         .filter({ r => r.getString(2) /* type */ == "relation" })
         .flatMap({ r =>
-          val bid = r.getLong(1) /* id */
-          val btype = r.getString(2) /* type */
+          val bid = r.getLong(1)                                      /* id */
+          val btype = r.getString(2)                                  /* type */
           val bp = Common.partitionNumberFn(bid, btype)
-          val instant = r.getTimestamp(9).getTime /* timestamp */
+          val instant = r.getTimestamp(9).getTime                     /* timestamp */
           val members: Array[Row] = r.get(7).asInstanceOf[Array[Row]] /* members */
 
           members.flatMap({ member =>
@@ -123,51 +123,50 @@ object ComputeIndexLocal {
               ))
             }
           })
-      }).distinct
+      })
   }
 
   def apply(
     rows: Array[Row],
-    previousEdgesDf: DataFrame
+    leftEdgesDf: DataFrame
   ): DataFrame = {
     logger.info(s"◼ Computing Index")
 
-    val initialEdges: Array[Row] = edgesFromRows(rows)
-    val initialEdgesMap: Map[(Long, String), Array[Row]] =
-      initialEdges
+    val rightEdges: Array[Row] = edgesFromRows(rows)
+    val rightEdgesMap: Map[(Long, String), Array[Row]] =
+      rightEdges
         .groupBy({ row =>
           (row.getLong(1) /* aid */, row.getString(2) /* atype*/)
         })
-
-    var additionalEdges: Array[Row] = initialEdges
-    var previousEdges: Array[Row] = {
-      val ps = initialEdges.map({ r => r.getLong(0) /* ap */ }).distinct
-      val ids = initialEdges.map({ r => r.getLong(1) /* aid */ }).distinct
+    var outputEdges: Array[Row] = rightEdges
+    var leftEdges: Array[Row] = {
+      val ps = rightEdges.map({ r => r.getLong(0) /* ap */ }).distinct
+      val ids = rightEdges.map({ r => r.getLong(1) /* aid */ }).distinct
       val dfs = ps.grouped(150).map({ list => // 175 bug (150 <= 175)
-        previousEdgesDf
+        leftEdgesDf
           .filter(col("bp").isin(list: _*)) // partition pruning
           .filter(col("bid").isin(ids: _*)) // predicate pushdown
       })
-      dfs.map({ df => df.select(Common.edgeColumns: _*).collect }).reduce(_ ++ _) ++ initialEdges
+      dfs.map({ df => df.select(Common.edgeColumns: _*).collect }).reduce(_ ++ _) ++ rightEdges
     }
     var iteration = 1L
     var keepGoing = false
 
     do {
-      val newEdges = transitiveStep(previousEdges, initialEdgesMap, iteration)
-      previousEdges = (previousEdges ++ newEdges).distinct
-      val before = additionalEdges.length
-      additionalEdges = (additionalEdges ++ newEdges).distinct
-      val after = additionalEdges.length
+      val newEdges = transitiveStep(leftEdges, rightEdgesMap, iteration)
+      leftEdges = (leftEdges ++ newEdges).distinct
+      val before = outputEdges.length
+      outputEdges = (outputEdges ++ newEdges).distinct
+      val after = outputEdges.length
       iteration = iteration + 1
       keepGoing = (before != after)
     } while (keepGoing)
 
-    val schema = previousEdgesDf.select(Common.edgeColumns: _*).schema
-    val spark = previousEdgesDf.sparkSession
+    val schema = leftEdgesDf.select(Common.edgeColumns: _*).schema
+    val spark = leftEdgesDf.sparkSession
     val sc = spark.sparkContext
 
-    spark.createDataFrame(sc.parallelize(additionalEdges, 1), schema)
+    spark.createDataFrame(sc.parallelize(outputEdges, 1), schema)
   }
 
 }

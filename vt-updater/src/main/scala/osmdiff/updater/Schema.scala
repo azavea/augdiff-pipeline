@@ -7,8 +7,8 @@ trait Schema {
   val features: Map[String, AugmentedDiffFeature]
 
   val newFeatures: Seq[VTFeature]
-  val replacementFeatures: Seq[VTFeature] = Seq.empty[VTFeature]
-  val retainedFeatures: Seq[VTFeature] = Seq.empty[VTFeature]
+  lazy val replacementFeatures: Seq[VTFeature] = Seq.empty[VTFeature]
+  lazy val retainedFeatures: Seq[VTFeature] = Seq.empty[VTFeature]
 }
 
 trait SchemaBuilder {

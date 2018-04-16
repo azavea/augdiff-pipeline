@@ -60,7 +60,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
       .toSeq
   }
 
-  lazy val replacementFeatures: Seq[VTFeature] = {
+  override lazy val replacementFeatures: Seq[VTFeature] = {
     val activeFeatures = touchedFeatures
       .filter {
         case (id, fs) =>
@@ -81,7 +81,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
     replacedFeatures
   }
 
-  lazy val retainedFeatures: Seq[VTFeature] = {
+  override lazy val retainedFeatures: Seq[VTFeature] = {
     val activeFeatures = touchedFeatures
       .filter {
         case (id, fs) =>

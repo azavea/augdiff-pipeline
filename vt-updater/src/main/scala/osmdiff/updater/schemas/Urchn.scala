@@ -113,4 +113,7 @@ class Urchn(override val layer: Layer, override val features: Map[String, Augmen
   }
 }
 
-
+object Urchn extends SchemaBuilder {
+  def apply(layer: Layer, features: Map[String, AugmentedDiffFeature]) =
+    new Urchn(layer, features)
+}

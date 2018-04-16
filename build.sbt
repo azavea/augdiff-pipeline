@@ -46,6 +46,6 @@ lazy val ad = (project in file ("ad"))
   .dependsOn(common)
   .settings(commonSettings: _*)
 
-lazy val vtUpdater = (project in file("vt-updater"))
+lazy val tileUpdater = (project in file("vt-updater"))
   .dependsOn(common)
   .settings(commonSettings: _*)

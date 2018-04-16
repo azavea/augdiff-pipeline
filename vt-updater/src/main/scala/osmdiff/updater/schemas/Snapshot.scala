@@ -14,12 +14,6 @@ class Snapshot(override val layer: Layer, override val features: Map[String, Aug
       .toSeq
   }
 
-  lazy val replacementFeatures: Seq[VTFeature] =
-    Seq.empty[VTFeature]
-
-  lazy val retainedFeatures: Seq[VTFeature] =
-    Seq.empty[VTFeature]
-
   private def makeFeature(feature: AugmentedDiffFeature): Option[VTFeature] = {
     val id = feature.data.id
 

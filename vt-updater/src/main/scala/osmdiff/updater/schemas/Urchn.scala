@@ -7,7 +7,7 @@ import org.joda.time.DateTime
 import osmdiff.updater.Implicits._
 import osmdiff.updater._
 
-class History(override val layer: Layer, override val features: Map[String, AugmentedDiffFeature]) extends Schema {
+class Urchn(override val layer: Layer, override val features: Map[String, AugmentedDiffFeature]) extends Schema {
   private lazy val logger = Logger.getLogger(getClass)
 
   private lazy val touchedFeatures: Map[String, Seq[VTFeature]] = {
@@ -22,7 +22,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
         .sortWith(_.data("__version") < _.data("__version")))
   }
 
-  private lazy val minorVersions: Map[String, Int] = {
+  private lazy val minorVersions: Map[String, Int] =
     features.values
       .groupBy(f => f.data.elementId)
       .mapValues(f => f.head.data)
@@ -34,7 +34,17 @@ class History(override val layer: Layer, override val features: Map[String, Augm
           case _ => 0
         }
       }
+
+  private lazy val authors: Map[String, Set[String]] = {
+    touchedFeatures
+      .mapValues(_.last)
+      .mapValues(_.data("__authors").split(",").toSet)
   }
+
+  private lazy val creation: Map[String, Long] =
+    touchedFeatures
+      .mapValues(_.head)
+      .mapValues(_.data("__creation"))
 
   private lazy val versionInfo: Map[String, (Int, Int, DateTime)] =
     touchedFeatures
@@ -45,7 +55,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
         new DateTime(f.data("__updated"): Long)
       ))
 
-  lazy val newFeatures: Seq[VTFeature] = {
+  lazy val newFeatures: Seq[VTFeature] =
     features.values
       .filter(f =>
         versionInfo.get(f.data.elementId) match {
@@ -54,48 +64,21 @@ class History(override val layer: Layer, override val features: Map[String, Augm
           case _ => false
         }
       )
-      .map(x => makeFeature(x, minorVersions.get(x.data.elementId)))
+      .map(x =>
+        makeFeature(
+          x,
+          creation
+            .getOrElse(x.data.elementId, x.data.timestamp.getMillis),
+          authors
+            .get(x.data.elementId)
+            .map(_ + x.data.user)
+            .getOrElse(Set(x.data.user)),
+          minorVersions.get(x.data.elementId)))
       .filter(_.isDefined)
       .map(_.get)
       .toSeq
-  }
 
-  lazy val replacementFeatures: Seq[VTFeature] = {
-    val activeFeatures = touchedFeatures
-      .filter {
-        case (id, fs) =>
-          features(id).data.timestamp.isAfter(fs.last.data("__updated"))
-      }
-
-    val featuresToReplace = activeFeatures
-      .mapValues(fs => fs.filter(_.data("__validUntil").toLong == 0))
-      .values
-      .flatten
-      .toSeq
-
-    val replacedFeatures = featuresToReplace
-      .map(f => updateFeature(f, features(f.data("__id")).data.timestamp))
-
-    logger.info(s"Rewriting ${replacedFeatures.length.formatted("%,d")} features")
-
-    replacedFeatures
-  }
-
-  lazy val retainedFeatures: Seq[VTFeature] = {
-    val activeFeatures = touchedFeatures
-      .filter {
-        case (id, fs) =>
-          features(id).data.timestamp.isAfter(fs.last.data("__updated"))
-      }
-
-    activeFeatures
-      .mapValues(fs => fs.filterNot(_.data("__validUntil").toLong == 0))
-      .values
-      .flatten
-      .toSeq
-  }
-
-  private def makeFeature(feature: AugmentedDiffFeature, minorVersion: Option[Int], validUntil: Option[Long] = None): Option[VTFeature] = {
+  private def makeFeature(feature: AugmentedDiffFeature, creation: Long, authors: Set[String], minorVersion: Option[Int]): Option[VTFeature] = {
     val id = feature.data.id
 
     val elementId = feature.data.elementType match {
@@ -116,27 +99,18 @@ class History(override val layer: Layer, override val features: Map[String, Augm
               "__id" -> VString(elementId),
               "__changeset" -> VInt64(feature.data.changeset),
               "__updated" -> VInt64(feature.data.timestamp.getMillis),
-              "__validUntil" -> VInt64(validUntil.getOrElse(0L)),
               "__version" -> VInt64(feature.data.version),
-              "__uid" -> VInt64(feature.data.uid),
-              "__user" -> VString(feature.data.user),
-              "__visible" -> VBool(feature.data.visible)
+              "__vtileGen" -> VInt64(System.currentTimeMillis),
+              "__creation" -> VInt64(creation),
+              "__authors" -> VString(authors.mkString(",")),
+              "__lastAuthor" -> VString(feature.data.user)
+
             ) ++ minorVersion.map(v => Map("__minorVersion" -> VInt64(v))).getOrElse(Map.empty[String, Value])
           )
         )
       case _ => None
     }
   }
-
-  private def updateFeature(feature: VTFeature, validUntil: DateTime): VTFeature = {
-    Feature(
-      feature.geom,
-      feature.data.updated("__validUntil", VInt64(validUntil.getMillis))
-    )
-  }
 }
 
-object History extends SchemaBuilder {
-  def apply(layer: Layer, features: Map[String, AugmentedDiffFeature]) =
-    new History(layer, features)
-}
+

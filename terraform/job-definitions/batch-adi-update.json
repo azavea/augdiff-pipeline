@@ -3,32 +3,23 @@
     "vcpus": 8,
     "memory": 8192,
     "command": [
-        "--pgdump-bucket", "Ref::pgdump-bucket",
-        "--pgdump-key", "Ref::pgdump-key",
-        "--pbf-bucket", "Ref::pbf-bucket",
-        "--history-key-pbf", "Ref::history-key-pbf",
-        "--snapshot-key-pbf", "Ref::snapshot-key-pbf",
-        "--changeset-key-pbf", "Ref::changeset-key-pbf"
-    ],
-    "volumes": [
-        {
-            "host": {
-                "sourcePath": "/media/ephemeral0"
-            },
-            "name": "ephemeral0"
-        }
     ],
     "environment": [
         {
-            "name": "AWS_DEFAULT_REGION",
-            "value": "${aws_region}"
-        }
-    ],
-    "mountPoints": [
+          "name": "METASTORE_ADDRESS",
+          "value": "${metastore_address}"
+        },
         {
-            "containerPath": "/tmp/data",
-            "readOnly": false,
-            "sourceVolume": "ephemeral0"
+          "name": "METASTORE_USERNAME",
+         "value": "${metastore_username}"
+        },
+        {
+          "name": "METASTORE_PASSWORD",
+          "value": "${metastore_password}"
+        },
+        {
+          "name": "METASTORE_DATABASE",
+          "value": "${metastore_database}"
         }
     ]
 }

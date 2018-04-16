@@ -3,27 +3,23 @@
     "vcpus": 8,
     "memory": 8192,
     "command": [
-        "--start", "1"
-    ],
-    "volumes": [
-        {
-            "host": {
-                "sourcePath": "/media/ephemeral0"
-            },
-            "name": "ephemeral0"
-        }
     ],
     "environment": [
         {
-            "name": "AWS_DEFAULT_REGION",
-            "value": "${aws_region}"
-        }
-    ],
-    "mountPoints": [
+          "name": "METASTORE_ADDRESS",
+          "value": "${metastore_address}"
+        },
         {
-            "containerPath": "/tmp/data",
-            "readOnly": false,
-            "sourceVolume": "ephemeral0"
+          "name": "METASTORE_USERNAME",
+         "value": "${metastore_username}"
+        },
+        {
+          "name": "METASTORE_PASSWORD",
+          "value": "${metastore_password}"
+        },
+        {
+          "name": "METASTORE_DATABASE",
+          "value": "${metastore_database}"
         }
     ]
 }

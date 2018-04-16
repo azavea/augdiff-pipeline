@@ -41,6 +41,10 @@ data "template_file" "adi_update" {
     #batch_image_url               = "busybox:latest"
     aws_region                    = "${var.aws_region}"
     environment                   = "${var.environment}"
+    metastore_address             = "${aws_db_instance.metastore.address}"
+    metastore_username            = "${aws_db_instance.metastore.username}"
+    metastore_password            = "${aws_db_instance.metastore.password}"
+    metastore_database            = "${aws_db_instance.metastore.name}"
   }
 }
 
@@ -71,6 +75,10 @@ data "template_file" "augdiff_gen" {
     #batch_image_url               = "busybox:latest"
     aws_region                    = "${var.aws_region}"
     environment                   = "${var.environment}"
+    metastore_address             = "${aws_db_instance.metastore.address}"
+    metastore_username            = "${aws_db_instance.metastore.username}"
+    metastore_password            = "${aws_db_instance.metastore.password}"
+    metastore_database            = "${aws_db_instance.metastore.name}"
   }
 }
 

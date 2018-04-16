@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 
 import boto3
 import requests as r
-import poll
 
+batch = boto3.client('batch')
 
 # generate changeset URL from replication sequence number
 def changeset_url(num):
@@ -38,74 +38,39 @@ def parse_state(state_text):
 
 # submit a job to batch based on the sequence number of a changeset
 def submit_index_update(num, dependency = None):
-    dependencies = None or [dependency]
-    return client.submit_job(
-        jobName='UpdateIndex-Sequence{}'.format(num),
-        jobQueue='string',
-        arrayProperties={
-            'size': 123
-        },
-        dependsOn=[dep for dep in [dependency] if dep is not None],
-        jobDefinition='string',
-        parameters={
-            'string': 'string'
-        },
-        containerOverrides={
-            'vcpus': 123,
-            'memory': 123,
-            'command': [
-                'string',
-            ],
-            'environment': [
-                {
-                    'name': 'string',
-                    'value': 'string'
-                },
-            ]
-        },
-        retryStrategy={
-            'attempts': 123
-        },
-        timeout={
-            'attemptDurationSeconds': 123
-        }
-    )
+client.submit_job(
+    jobName='testJob',
+    jobQueue='queueAugDiffDefault',
+    jobDefinition='arn:aws:batch:us-east-1:896538046175:job-definition/jobAugDiffAdiUpdate:3',
+    parameters={
+        'string': 'string'
+    },
+    containerOverrides={
+        'command': [
+            'https://planet.openstreetmap.org/replication/minute/002/003/999.osc.gz',
+        ]
+    },
+    dependsOn=[dep for dep in [dependency] if dep is not None]
+)
+
 
 def submit_augdiff(num, dependency)
     return client.submit_job(
-        jobName='GenerateAugDiff-Sequence{}'.format(num),
-        jobQueue='string',
-        arrayProperties={
-            'size': 123
-        },
-        dependsOn=[ dependency ],
-        jobDefinition='string',
+        jobName='testJob',
+        jobQueue='queueAugDiffDefault',
+        jobDefinition='arn:aws:batch:us-east-1:896538046175:job-definition/jobAugDiffAdiUpdate:3',
         parameters={
             'string': 'string'
         },
         containerOverrides={
-            'vcpus': 123,
-            'memory': 123,
             'command': [
-                'string',
-            ],
-            'environment': [
-                {
-                    'name': 'string',
-                    'value': 'string'
-                },
+                'https://planet.openstreetmap.org/replication/minute/002/003/999.osc.gz',
             ]
         },
-        retryStrategy={
-            'attempts': 123
-        },
-        timeout={
-            'attemptDurationSeconds': 123
-        }
+        dependsOn=[dep for dep in [dependency] if dep is not None]
     )
 
 
-def submit_changeset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='.')
@@ -117,6 +82,9 @@ if __name__ == "__main__":
     current_state = parse_state(current_state_request.text)
     current_number = current_state['sequenceNumber']
 
+    # Initialize this dependency to None
+    last_job = None
+
     # Handle different initialization scenarios
     if args.start is None:
         print('starting at current changeset; replication no. {}'.format(current_number))
@@ -124,12 +92,18 @@ if __name__ == "__main__":
         print('start is ahead of current sequence')
     else:
         for seqNum in [x for x in range(args.start, current_number + 1)]:
+            indexing_job = submit_index_update(num, last_job)
+            submit_changeset(num, indexing_job)
+            last_job = indexing_job
             print('running for {}'.format(changeset_url(seqNum)))
 
     # Poll; submitting jobs upon success
     while True:
         change_request = r.head(changeset_url(current_number))
         if change_request.status_code == 200:
+            indexing_job = submit_index_update(num, last_job)
+            submit_changeset(num, indexing_job)
+            last_job = indexing_job
             print(current_number, 'SUCCESS: {}'.format(change_request.status_code))
             current_number = current_number + 1
         else:

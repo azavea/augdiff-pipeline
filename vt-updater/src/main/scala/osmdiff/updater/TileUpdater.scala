@@ -99,6 +99,7 @@ object TileUpdater extends CommandApp(
             if (dryRun) {
               println(s"Would write ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
             } else {
+              logger.info(s"Writing ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
               write(uri, tile.toBytes)
             }
 

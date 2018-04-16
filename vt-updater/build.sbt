@@ -1,7 +1,7 @@
 name := "vt-updater"
 
 libraryDependencies ++= Seq(
-  "com.amazonaws"                % "aws-java-sdk"          % "1.7.4",
+  "com.amazonaws"                % "aws-java-sdk"          % "1.11.313",
   "com.monovore"                %% "decline"               % "0.4.1",
   "org.locationtech.geotrellis" %% "geotrellis-vector"     % "1.2.1",
   "org.locationtech.geotrellis" %% "geotrellis-vectortile" % "1.2.1",

@@ -1,20 +1,26 @@
 package osmdiff
 
+import java.io.ByteArrayInputStream
 import java.net.URI
 import java.nio.file.{Files, Paths}
 
+import com.amazonaws.services.s3.model.{AmazonS3Exception, ObjectMetadata}
+import com.amazonaws.services.s3.{AmazonS3, AmazonS3ClientBuilder}
 import geotrellis.proj4.{LatLng, WebMercator}
 import geotrellis.spark.SpatialKey
 import geotrellis.spark.tiling.{LayoutDefinition, ZoomedLayoutScheme}
 import geotrellis.vector.{Extent, Feature, Geometry, Line, MultiLine, MultiPoint, MultiPolygon, Point, Polygon}
 import geotrellis.vectortile._
+import org.apache.commons.io.IOUtils
 import org.apache.log4j.Logger
 import osmdiff.updater.Implicits._
 
 import scala.collection.mutable.ListBuffer
+import scala.util.{Failure, Success, Try}
 
 package object updater {
   private lazy val logger = Logger.getLogger(getClass)
+  private lazy val s3: AmazonS3 = AmazonS3ClientBuilder.defaultClient()
 
   type AugmentedDiffFeature = Feature[Geometry, AugmentedDiff]
   type VTFeature = Feature[Geometry, VTProperties]
@@ -23,20 +29,57 @@ package object updater {
 
   val LayoutScheme: ZoomedLayoutScheme = ZoomedLayoutScheme(WebMercator)
 
+  private def createMetadata(contentLength: Int): ObjectMetadata = {
+    val meta = new ObjectMetadata()
+
+    meta.setContentLength(contentLength)
+
+    meta
+  }
+
+
   def read(uri: URI): Option[Array[Byte]] = {
-    // TODO S3 support
+    uri.getScheme match {
+      case "s3" =>
+        Try(IOUtils.toByteArray(s3.getObject(uri.getHost, uri.getPath.drop(1)).getObjectContent)) match {
+          case Success(bytes) => Some(bytes)
+          case Failure(e) =>
+            e match {
+              case ex: AmazonS3Exception if ex.getErrorCode == "NoSuchKey" =>
+              case ex: AmazonS3Exception =>
+                logger.warn(s"Could not read $uri: ${ex.getMessage}")
+              case _ =>
+                logger.warn(s"Could not read $uri: $e")
+            }
 
-    val path = Paths.get(uri)
+            None
+        }
+      case "file" =>
+        val path = Paths.get(uri)
 
-    if (Files.exists(path)) {
-      Some(Files.readAllBytes(path))
-    } else {
-      None
+        if (Files.exists(path)) {
+          Some(Files.readAllBytes(path))
+        } else {
+          None
+        }
     }
   }
 
-  def write(path: URI, bytes: Array[Byte]) = {
-    Files.write(Paths.get(path), bytes)
+  def write(uri: URI, bytes: Array[Byte]): Any = {
+    uri.getScheme match {
+      case "s3" =>
+        Try(s3.putObject(uri.getHost, uri.getPath.drop(1), new ByteArrayInputStream(bytes), createMetadata(bytes.length))) match {
+          case Success(_) =>
+          case Failure(e) => e match {
+            case ex: AmazonS3Exception =>
+              logger.warn(s"Could not write $uri: ${ex.getMessage}")
+            case _ =>
+              logger.warn(s"Could not write $uri: $e")
+          }
+        }
+      case "file" =>
+        Files.write(Paths.get(uri), bytes)
+    }
   }
 
   def tile(features: Seq[AugmentedDiffFeature], layout: LayoutDefinition): Map[SpatialKey, Seq[AugmentedDiffFeature]] = {
@@ -107,7 +150,7 @@ package object updater {
 
                   process(sk, newTile)
                 case _ =>
-                  println(s"No changes to $uri; skipping")
+                  logger.info(s"No changes to $uri; skipping")
               }
             case None =>
           }

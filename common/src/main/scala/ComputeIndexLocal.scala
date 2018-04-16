@@ -130,14 +130,28 @@ object ComputeIndexLocal {
         })
     var outputEdges: Array[Row] = rightEdges
     var leftEdges: Array[Row] = {
-      val ps = rightEdges.map({ r => r.getLong(0) /* ap */ }).distinct
-      val ids = rightEdges.map({ r => r.getLong(1) /* aid */ }).distinct
-      val dfs = ps.grouped(150).map({ list => // 175 bug (150 <= 175)
-        leftEdgesDf
-          .filter(col("bp").isin(list: _*)) // partition pruning
-          .filter(col("bid").isin(ids: _*)) // predicate pushdown
+      val groupSize = 150
+      val desired = rightEdges
+        .map({ r => (r.getLong(1) /* aid */, r.getString(2) /* atype */) })
+        .toSet
+      val pairs = desired
+        .groupBy({ pair => Common.partitionNumberFn(pair._1, pair._2) })
+      logger.info(s"◼ Reading ${pairs.size} partitions in groups of ${groupSize}") // 175 bug (groupSize <= 175)
+      val dfs = pairs.grouped(groupSize).toList.map({ group =>
+        logger.info("◼ Reading group")
+        val ps = group.map({ kv => kv._1 }).toArray
+        val ids = group.flatMap({ kv => kv._2.map(_._1) }).toArray.distinct
+        val retval = leftEdgesDf
+          .filter(col("bp").isin(ps: _*)) // partition pruning
+        if (ids.length < 4096)
+          retval.filter(col("bid").isin(ids: _*)) // predicate pushdown
+        else retval
       })
-      dfs.map({ df => df.select(Common.edgeColumns: _*).collect }).reduce(_ ++ _) ++ rightEdges
+      dfs.map({ df =>
+        df.select(Common.edgeColumns: _*)
+          .collect
+          .filter({ r => desired.contains((r.getLong(1) /* aid */, r.getString(2) /* atype */)) })
+      }).reduce(_ ++ _) ++ rightEdges
     }
     var iteration = 1L
     var keepGoing = false

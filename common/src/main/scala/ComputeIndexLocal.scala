@@ -102,8 +102,7 @@ object ComputeIndexLocal {
             val rightBtype = row2.getString(6) /* btype */
 
             if (leftBid != rightAid || leftBtype != rightAtype) None // The two edges must meet
-            else if (leftAtype == "way" && rightBtype == "way") None // Do not join way to way
-            else if (leftAtype == "node" && rightBtype == "node") None // Do not join node to node
+            else if (leftAtype != "relation" && rightBtype != "relation") None // Extended chains are over relations
             else if (leftAid == rightBid && leftAtype == rightBtype) None // Do not join thing to itself
             else {
               Some(Row(

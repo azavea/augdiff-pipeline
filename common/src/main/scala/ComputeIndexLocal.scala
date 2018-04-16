@@ -31,18 +31,14 @@ object ComputeIndexLocal {
             val atype = "node"
             val ap = Common.partitionNumberFn(aid, atype)
             val forward = Row(
-                ap, aid, atype,
-                instant,
-                bp, bid, btype,
-                0L, /* XXX iteration */
-                false
-              )
+              ap, aid, atype,
+              instant,
+              bp, bid, btype
+            )
             val reverse = Row(
-                bp, bid, btype,
-                instant,
-                ap, aid, atype,
-                0L, /* XXX iteration */
-                true
+              bp, bid, btype,
+              instant,
+              ap, aid, atype
               )
             Array[Row](forward, reverse)
           })
@@ -64,16 +60,12 @@ object ComputeIndexLocal {
             val forward = Row(
               ap, aid, atype,
               instant,
-              bp, bid, btype,
-              0L, /* XXX iteration */
-              false
+              bp, bid, btype
             )
             val reverse = Row(
               bp, bid, btype,
               instant,
-              ap, aid, atype,
-              0L, /* XXX iteration */
-              true
+              ap, aid, atype
             )
             Array[Row](forward, reverse)
           })
@@ -117,9 +109,7 @@ object ComputeIndexLocal {
               Some(Row(
                 leftAp, leftAid, leftAtype,
                 math.max(leftInstant, rightInstant),
-                rightBp, rightBid, rightBtype,
-                0L, // XXX
-                false
+                rightBp, rightBid, rightBtype
               ))
             }
           })

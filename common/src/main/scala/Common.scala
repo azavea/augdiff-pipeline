@@ -92,9 +92,8 @@ object Common {
   val edgeColumns: List[Column] = List(
     col("ap"), col("aid"), col("atype"), /* 0, 1, 2 */
     col("instant"),                      /* 3 */
-    col("bp"), col("bid"), col("btype"), /* 4, 5, 6 */
-    col("iteration"),                    /* 7 */
-    col("extra"))                        /* 8 */
+    col("bp"), col("bid"), col("btype")) /* 4, 5, 6 */
+  val edgeColumnsPlus: List[Column] = edgeColumns :+ col("iteration")
 
   private val logger = {
     val logger = Logger.getLogger(this.getClass)

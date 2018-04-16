@@ -13,24 +13,12 @@ object ComputeIndex {
     logger
   }
 
-  private def reset(edges: DataFrame): DataFrame = { // XXX optimization barrier question
-    edges
-      .select(
-        col("ap"), col("aid"), col("atype"),
-        col("instant"),
-        col("bp"), col("bid"), col("btype"),
-        lit(0L).as("iteration"),
-        col("extra"))
-  }
-
   private def mirror(edges: DataFrame): DataFrame = {
     edges
       .select(
         col("bp").as("ap"), col("bid").as("aid"), col("btype").as("atype"),
         col("instant"),
-        col("ap").as("bp"), col("aid").as("bid"), col("atype").as("btype"),
-        lit(0L).as("iteration"),
-        lit(true).as("extra"))
+        col("ap").as("bp"), col("aid").as("bid"), col("atype").as("btype"))
   }
 
   private def edgesFromRows(rows: DataFrame): DataFrame = {
@@ -48,8 +36,7 @@ object ComputeIndex {
           col("instant"),
           Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
           col("bid"), col("btype"),
-          lit(0L).as("iteration"),
-          lit(false).as("extra"))
+          lit(0L).as("iteration"))
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
@@ -64,10 +51,8 @@ object ComputeIndex {
           col("members.type").as("atype"),
           col("instant"),
           Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
-          col("bid"),
-          col("btype"),
-          lit(0L).as("iteration"),
-          lit(false).as("extra"))
+          col("bid"), col("btype"),
+          lit(0L).as("iteration"))
 
     halfEdgesFromNodes.union(halfEdgesFromRelations)
   }
@@ -91,28 +76,27 @@ object ComputeIndex {
         col("left.ap").as("ap"), col("left.aid").as("aid"), col("left.atype").as("atype"),
         Common.larger(col("left.instant"), col("right.instant")).as("instant"),
         col("right.bp").as("bp"), col("right.bid").as("bid"), col("right.btype").as("btype"),
-        lit(iteration).as("iteration"),
-        lit(false).as("extra"))
+        lit(iteration).as("iteration"))
   }
 
   def apply(rows: DataFrame): DataFrame = {
     logger.info(s"◻ Computing Index")
 
-    val rightEdges = edgesFromRows(rows).select(Common.edgeColumns: _*)
+    val rightEdges = edgesFromRows(rows).select(Common.edgeColumnsPlus: _*)
     var outputEdges = rightEdges
     var leftEdges = rightEdges
     var iteration = 1L
     var keepGoing = false
 
     do {
-      val newEdges = transitiveStep(leftEdges, rightEdges, iteration).select(Common.edgeColumns: _*)
-      leftEdges = leftEdges.union(newEdges).select(Common.edgeColumns: _*)
-      outputEdges = outputEdges.union(newEdges).select(Common.edgeColumns: _*)
+      val newEdges = transitiveStep(leftEdges, rightEdges, iteration).select(Common.edgeColumnsPlus: _*)
+      leftEdges = leftEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
+      outputEdges = outputEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       iteration = iteration + 1L
       keepGoing = (iteration < 7) && (!newEdges.rdd.isEmpty)
     } while (keepGoing)
 
-    reset(outputEdges).select(Common.edgeColumns: _*)
+    outputEdges.select(Common.edgeColumns: _*)
       .union(mirror(outputEdges).select(Common.edgeColumns: _*))
   }
 

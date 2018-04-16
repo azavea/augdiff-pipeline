@@ -14,3 +14,9 @@ That timestamp can then be used as an argument to the diff publisher:
 ```bash
 node index.js 2018-04-09T02:00:01Z s3://bucket/augdiffs/
 ```
+
+When running from Docker:
+
+```bash
+docker-compose run publisher 2018-04-09T02:00:01Z s3://bucket/augdiffs/
+```

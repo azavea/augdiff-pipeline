@@ -5,7 +5,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 // import scala.collection.JavaConversions._
-// import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable
 
 
 object ComputeIndexLocal {
@@ -75,11 +75,11 @@ object ComputeIndexLocal {
   }
 
   def transitiveStep(
-    leftEdges: Array[Row],
+    leftEdges: mutable.Set[Row],
     rightEdges: Map[(Long, String), Array[Row]],
     iteration: Long
-  ): Array[Row] = {
-    logger.info(s"◼ Transitive closure iteration=$iteration left=${leftEdges.length}")
+  ) = {
+    logger.info(s"◼ Transitive closure iteration=$iteration left=${leftEdges.size}")
     leftEdges
       .flatMap({ row1 => // Manual inner join
         val leftAp = row1.getLong(0)      /* ap */
@@ -128,8 +128,8 @@ object ComputeIndexLocal {
         .groupBy({ row =>
           (row.getLong(1) /* aid */, row.getString(2) /* atype*/)
         })
-    var outputEdges: Array[Row] = rightEdges
-    var leftEdges: Array[Row] = {
+    val outputEdges: mutable.Set[Row] = (mutable.Set.empty[Row] ++ rightEdges)
+    val leftEdges: mutable.Set[Row] = {
       val groupSize = 150
       val desired = rightEdges
         .map({ r => (r.getLong(1) /* aid */, r.getString(2) /* atype */) })
@@ -147,21 +147,23 @@ object ComputeIndexLocal {
           retval.filter(col("bid").isin(ids: _*)) // predicate pushdown
         else retval
       })
-      dfs.map({ df =>
-        df.select(Common.edgeColumns: _*)
+      val s = mutable.Set.empty[Row]
+      dfs.foreach({ df =>
+        s ++= df.select(Common.edgeColumns: _*)
           .collect
           .filter({ r => desired.contains((r.getLong(1) /* aid */, r.getString(2) /* atype */)) })
-      }).reduce(_ ++ _) ++ rightEdges
+      })
+      s ++= rightEdges
     }
     var iteration = 1L
     var keepGoing = false
 
     do {
       val newEdges = transitiveStep(leftEdges, rightEdgesMap, iteration)
-      leftEdges = (leftEdges ++ newEdges).distinct
-      val before = outputEdges.length
-      outputEdges = (outputEdges ++ newEdges).distinct
-      val after = outputEdges.length
+      leftEdges ++= newEdges
+      val before = outputEdges.size
+      outputEdges ++= newEdges
+      val after = outputEdges.size
       iteration = iteration + 1
       keepGoing = (before != after)
     } while (keepGoing)
@@ -170,7 +172,7 @@ object ComputeIndexLocal {
     val spark = leftEdgesDf.sparkSession
     val sc = spark.sparkContext
 
-    spark.createDataFrame(sc.parallelize(outputEdges, 1), schema)
+    spark.createDataFrame(sc.parallelize(outputEdges.toSeq, 1), schema)
   }
 
 }

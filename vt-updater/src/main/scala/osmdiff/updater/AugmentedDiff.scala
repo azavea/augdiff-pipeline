@@ -2,7 +2,7 @@ package osmdiff.updater
 
 import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
-import spray.json.{DeserializationException, JsNumber, JsObject, JsString, JsValue, RootJsonReader}
+import spray.json.{DeserializationException, JsBoolean, JsNumber, JsObject, JsString, JsValue, RootJsonReader}
 
 case class AugmentedDiff(
                           changeset: Long,
@@ -12,6 +12,7 @@ case class AugmentedDiff(
                           uid: Long,
                           user: String,
                           version: Int,
+                          visible: Boolean,
                           tags: Map[String, String]
                         ) {
   val elementId: String = elementType match {
@@ -75,6 +76,12 @@ object AugmentedDiff {
             case None => throw DeserializationException(s"'version' is required")
           }
 
+          val visible = fields.get("visible") match {
+            case Some(JsBoolean(v)) => v
+            case Some(v) => throw DeserializationException(s"'visible' must be a boolean, got $v")
+            case None => throw DeserializationException(s"'visible' is required")
+          }
+
           val tags = fields.get("tags") match {
             case Some(JsObject(o)) => o.mapValues {
               case JsString(v) => v
@@ -84,7 +91,7 @@ object AugmentedDiff {
             case None => throw DeserializationException(s"'tags' is required")
           }
 
-          AugmentedDiff(changeset, id, elementType, timestamp, uid, user, version, tags)
+          AugmentedDiff(changeset, id, elementType, timestamp, uid, user, version, visible, tags)
         case _ => throw DeserializationException(s"'properties' is required")
       }
   }

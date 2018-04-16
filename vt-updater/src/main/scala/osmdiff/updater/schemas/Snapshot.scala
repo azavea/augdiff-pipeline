@@ -7,6 +7,7 @@ import osmdiff.updater._
 class Snapshot(override val layer: Layer, override val features: Map[String, AugmentedDiffFeature]) extends Schema {
   lazy val newFeatures: Seq[VTFeature] = {
     features.values
+      .filter(_.data.visible)
       .map(makeFeature)
       .filter(_.isDefined)
       .map(_.get)

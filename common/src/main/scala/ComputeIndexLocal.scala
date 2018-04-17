@@ -127,33 +127,9 @@ object ComputeIndexLocal {
         .groupBy({ row =>
           (row.getLong(1) /* aid */, row.getString(2) /* atype*/)
         })
+    val desired = rightEdges.map({ r => (r.getLong(1) /* aid */, r.getString(2) /* atype */) }).toSet
     val outputEdges: mutable.Set[Row] = (mutable.Set.empty[Row] ++ rightEdges)
-    val leftEdges: mutable.Set[Row] = {
-      val groupSize = 150
-      val desired = rightEdges
-        .map({ r => (r.getLong(1) /* aid */, r.getString(2) /* atype */) })
-        .toSet
-      val pairs = desired
-        .groupBy({ pair => Common.partitionNumberFn(pair._1, pair._2) })
-      logger.info(s"◼ Reading ${pairs.size} partitions in groups of ${groupSize}") // 175 bug (groupSize <= 175)
-      val dfs = pairs.grouped(groupSize).toList.map({ group =>
-        logger.info("◼ Reading group")
-        val ps = group.map({ kv => kv._1 }).toArray
-        val ids = group.flatMap({ kv => kv._2.map(_._1) }).toArray.distinct
-        val retval = leftEdgesDf
-          .filter(col("bp").isin(ps: _*)) // partition pruning
-        if (ids.length < 4096)
-          retval.filter(col("bid").isin(ids: _*)) // predicate pushdown
-        else retval
-      })
-      val s = mutable.Set.empty[Row]
-      dfs.foreach({ df =>
-        s ++= df.select(Common.edgeColumns: _*)
-          .collect
-          .filter({ r => desired.contains((r.getLong(1) /* aid */, r.getString(2) /* atype */)) })
-      })
-      s ++= rightEdges
-    }
+    val leftEdges: mutable.Set[Row] = (Common.loadEdges(desired, leftEdgesDf) ++= rightEdges)
     var iteration = 1L
     var keepGoing = false
 

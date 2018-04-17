@@ -68,7 +68,7 @@ object ComputeIndex {
       rightEdges.as("right"),
         ((col("left.bp") === col("right.ap")) && // Try to use partition pruning (may get better in some future version)
          (col("left.bid") === col("right.aid") && col("left.btype") === col("right.atype")) && // The two edges meet
-         (col("left.atype") === lit("relation") || col("right.btype") === lit("relation")) && // Extended chains only involve relations
+         (col("left.atype") === lit("relation") || col("right.btype") === lit("relation")) && // Transitive extensions only involve relations
          (col("left.aid") =!= col("right.bid") || col("left.atype") =!= col("right.btype"))), // Do not join something to itself
         "inner")
       .select(

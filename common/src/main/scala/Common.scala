@@ -7,6 +7,8 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
 
+import scala.collection.mutable
+
 
 object Common {
 
@@ -16,6 +18,7 @@ object Common {
       .setIfMissing("spark.executor.heartbeatInterval", "30")
       .setIfMissing("spark.hadoop.hive.execution.engine", "spark")
       .setIfMissing("spark.master", "local[*]")
+      .setIfMissing("spark.ui.enabled", "true")
       .set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
       .set("spark.hadoop.hive.vectorized.execution.enabled", "true")
       .set("spark.hadoop.hive.vectorized.execution.reduce.enabled", "true")
@@ -28,6 +31,30 @@ object Common {
       .getOrCreate
   }
 
+  val pfLimit = 150 // Partition filter size limit
+  val idLimit = 4096 // Predicate pushdown size limit
+
+  private val bits = 16
+
+  def partitionNumberFn(id: Long, tipe: String): Long = {
+    var a = id
+    while (a > ((1L)<<(bits-1))) {
+      a = a/ 10
+    }
+    val b = tipe match {
+      case "node" => 0L
+      case "way" => 1L
+      case "relation" => 2L
+    }
+    a ^ b
+  }
+
+  val partitionNumberUdf = udf({ (id: Long, tipe: String) =>
+    partitionNumberFn(id, tipe)
+  })
+
+  val larger = udf({ (x: Long, y: Long) => math.max(x,y) })
+
   val getInstant = udf({ (ts: java.sql.Timestamp) => ts.getTime })
 
   val ndsSchema = ArrayType(StructType(List(StructField("ref", LongType, true))))
@@ -36,6 +63,7 @@ object Common {
     StructField("ref", LongType, true),
     StructField("role", StringType, true))))
   val osmSchema = StructType(List(
+    StructField("p", LongType, true),
     StructField("id", LongType, true),
     StructField("type", StringType, true),
     StructField("tags", MapType(StringType, StringType), true),
@@ -51,30 +79,29 @@ object Common {
     StructField("visible", BooleanType, true)))
 
   val osmColumns: List[Column] = List(
-    col("id"),
-    col("type"),
-    col("tags"),
-    col("lat"),
-    col("lon"),
-    col("nds"),
-    col("members"),
-    col("changeset"),
-    col("timestamp"),
-    col("uid"),
-    col("user"),
-    col("version"),
-    col("visible"))
+    col("p"),         /* 0 */
+    col("id"),        /* 1 */
+    col("type"),      /* 2 */
+    col("tags"),      /* 3 */
+    col("lat"),       /* 4 */
+    col("lon"),       /* 5 */
+    col("nds"),       /* 6 */
+    col("members"),   /* 7 */
+    col("changeset"), /* 8 */
+    col("timestamp"), /* 9 */
+    col("uid"),       /* 10 */
+    col("user"),      /* 11 */
+    col("version"),   /* 12 */
+    col("visible"))   /* 13 */
 
-  val indexColumns: List[Column] = List(
-    col("prior_id"),
-    col("prior_type"),
-    col("instant"),
-    col("dependent_id"),
-    col("dependent_type"))
-  val indexColumns2: List[Column] = indexColumns ++ List(col("iteration"))
+  val edgeColumns: List[Column] = List(
+    col("ap"), col("aid"), col("atype"), /* 0, 1, 2 */
+    col("instant"),                      /* 3 */
+    col("bp"), col("bid"), col("btype")) /* 4, 5, 6 */
+  val edgeColumnsPlus: List[Column] = edgeColumns :+ col("iteration")
 
   private val logger = {
-    val logger = Logger.getLogger(Common.getClass)
+    val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
     logger
   }
@@ -84,97 +111,48 @@ object Common {
     Logger.getLogger("akka").setLevel(Level.ERROR)
   }
 
+  def loadEdges(desired: Set[(Long, String)], edges: DataFrame): mutable.Set[Row] = { // XXX too many instants
+    val pairs = desired.groupBy({ pair => partitionNumberFn(pair._1, pair._2) })
+    logger.info(s"◼ Reading ${pairs.size} partitions in groups of ${pfLimit}") // 175 bug (pfLimit <= 175)
+    val dfs = pairs.grouped(pfLimit).map({ _group =>
+      logger.info("◼ Reading group")
+      val group = _group.toArray
+      val ps = group.map({ kv => kv._1 })
+      val ids = group.flatMap({ kv => kv._2.map(_._1) }).distinct
+      val retval = edges.filter(col("bp").isin(ps: _*)) // partition pruning
+      if (ids.length < idLimit)
+        retval.filter(col("bid").isin(ids: _*)) // predicate pushdown
+      else retval
+    })
+    val s = mutable.Set.empty[Row]
+    dfs.foreach({ df =>
+      s ++= df.select(edgeColumns: _*)
+        .collect
+        .filter({ r => desired.contains((r.getLong(1) /* aid */, r.getString(2) /* atype */)) })
+    })
+    s
+  }
+
   def saveBulk(bulk: DataFrame, tableName: String, mode: String): Unit = {
     logger.info(s"Writing bulk")
     bulk
+      .orderBy("p", "id", "type")
       .write
       .mode(mode)
       .format("orc")
-      .sortBy("id", "type", "timestamp").bucketBy(1, "id", "type")
+      .partitionBy("p")
       .saveAsTable(tableName)
   }
 
   def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
     logger.info(s"Writing index")
     index
+      .orderBy("bp", "bid", "btype")
       .write
       .mode(mode)
       .format("orc")
-      .sortBy("prior_id", "prior_type", "instant").bucketBy(1, "prior_id", "prior_type")
-      .saveAsTable(tableName)
-  }
-
-  def transitiveClosure(osm: DataFrame, existingIndex: Option[DataFrame]): DataFrame = {
-    // Beginnings of transitive chains
-    val nodeToWays = osm
-      .filter(col("type") === "way")
-      .select(
-      explode(col("nds.ref")).as("prior_id"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("dependent_id"),
-        col("type").as("dependent_type"))
-      .withColumn("prior_type", lit("node"))
-    val xToRelations = osm
-      .filter(col("type") === "relation")
-      .select(
-      explode(col("members")).as("prior"),
-        Common.getInstant(col("timestamp")).as("instant"),
-        col("id").as("dependent_id"),
-        col("type").as("dependent_type"))
-      .withColumn("prior_id", col("prior.ref"))
-      .withColumn("prior_type", col("prior.type"))
-      .drop("prior")
-
-    // Compute transitive chains
-    var indexUpdates = nodeToWays.select(Common.indexColumns: _*)
-      .union(xToRelations.select(Common.indexColumns: _*))
-      .withColumn("iteration", lit(0L))
-      .distinct // XXX
-      .cache
-    val index: DataFrame = existingIndex match {
-      case Some(existingIndex) =>
-        existingIndex.select(Common.indexColumns: _*)
-          .union(indexUpdates.select(Common.indexColumns: _*))
-      case None => indexUpdates
-    }
-    var i: Long = 1; var keepGoing = true
-    do {
-      logger.info(s"Transitive closure iteration $i")
-      val additions = index.as("left") // somewhat overkill
-        .join(
-          indexUpdates.filter(col("iteration") === (i-1)).as("right"),
-          ((col("left.dependent_id") === col("right.prior_id")) &&
-           (col("left.dependent_type") === col("right.prior_type")) &&
-           (col("left.instant") <= col("right.instant"))), // XXX <=
-          "inner")
-        .select(
-          col("left.prior_id").as("prior_id"),
-          col("left.prior_type").as("prior_type"),
-          col("right.dependent_id").as("dependent_id"),
-          col("right.dependent_type").as("dependent_type"),
-          col("left.instant").as("instant"),  // XXX instant?
-          lit(i).as("iteration"))
-        .filter(!(col("prior_id") === col("dependent_id") && col("prior_type") === col("dependent_type")))
-        .cache
-      try {
-        additions.head
-        keepGoing = true
-      } catch {
-        case e: Exception => keepGoing = false
-      }
-      val oldIndexUpdates = indexUpdates
-      indexUpdates =
-        indexUpdates.select(Common.indexColumns2: _*)
-          .union(additions.select(Common.indexColumns2: _*))
-          .distinct // XXX
-          .cache
-      oldIndexUpdates.unpersist
-      additions.unpersist
-      i=i+1
-    } while(keepGoing)
-
-    // Return index
-    indexUpdates
+      .partitionBy("bp")
+    .saveAsTable(tableName)
   }
 
 }

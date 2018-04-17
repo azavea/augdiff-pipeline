@@ -1,5 +1,6 @@
 package osmdiff
 
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
@@ -29,14 +30,17 @@ object ChangeAugmenter {
     val lon = null
     val nds = Array.empty[Row]
     val members = Array.empty[Row]
-    val typeString: String = entity.getType match {
+    val tipe: String = entity.getType match {
       case EntityType.Node => "node"
       case EntityType.Way => "way"
       case EntityType.Relation => "relation"
       case _ => throw new Exception
     }
 
-    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    val p = Common.partitionNumberFn(id, tipe)
+    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+
+    row
   }
 
   def entityToRow(entity: Entity, visible: Boolean): Row = {
@@ -54,24 +58,24 @@ object ChangeAugmenter {
     var lon: BigDecimal = null
     var nds: Array[Row] = Array.empty[Row]
     var members: Array[Row] = Array.empty[Row]
-    var typeString: String = null
+    var tipe: String = null
 
     entity.getType match {
       case EntityType.Node =>
         val node = entity.asInstanceOf[Node]
-        typeString = "node"
+        tipe = "node"
         lat = BigDecimal(node.getLatitude)
         lon = BigDecimal(node.getLongitude)
       case EntityType.Way =>
         val way = entity.asInstanceOf[Way]
-        typeString = "way"
+        tipe = "way"
         nds = way.getWayNodes.toArray.map({ wayNode => Row(wayNode.asInstanceOf[WayNode].getNodeId) })
       case EntityType.Relation =>
         val relation = entity.asInstanceOf[Relation]
-        typeString = "relation"
+        tipe = "relation"
         members = relation.getMembers.toArray.map({ relationMember =>
           val rm = relationMember.asInstanceOf[RelationMember]
-          val typeString2 = rm.getMemberType match {
+          val tipe2 = rm.getMemberType match {
             case EntityType.Node => "node"
             case EntityType.Way => "way"
             case EntityType.Relation => "relation"
@@ -79,12 +83,15 @@ object ChangeAugmenter {
           }
           val ref = rm.getMemberId
           val role = rm.getMemberRole
-          Row(typeString2, ref, role)
+          Row(tipe2, ref, role)
         })
       case _ => throw new Exception
     }
 
-    Row(id, typeString, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    val p = Common.partitionNumberFn(id, tipe)
+    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+
+    row
   }
 
 }
@@ -92,42 +99,52 @@ object ChangeAugmenter {
 class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   import ChangeAugmenter._
 
-  val ab = mutable.ArrayBuffer.empty[Row]
+  val rs = mutable.ArrayBuffer.empty[Row]
+
+  val logger = {
+    val logger = Logger.getLogger(this.getClass)
+    logger.setLevel(Level.INFO)
+    logger
+  }
+
 
   def process(ct: ChangeContainer): Unit = {
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
-        ab.append(entityToRow(ct.getEntityContainer.getEntity, true))
+        val r = entityToRow(ct.getEntityContainer.getEntity, true)
+        rs.append(r)
       case ChangeAction.Delete =>
-        ab.append(entityToLesserRow(ct.getEntityContainer.getEntity, false))
+        val r = entityToLesserRow(ct.getEntityContainer.getEntity, false)
+        rs.append(r)
       case _ =>
     }
 
   }
 
   def initialize(m: java.util.Map[String,Object]): Unit = {
-    println(s"initialize: ${m.entrySet.toArray.toList}")
+    logger.info(s"initialize: ${m.entrySet.toArray.toList}")
   }
 
   def complete(): Unit = {
-    println("complete")
-
-    val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
-    val osm = spark.createDataFrame(
-      spark.sparkContext.parallelize(ab.toList),
-      StructType(Common.osmSchema))
-    val lastLive = osm
-      .withColumn("row_number", row_number().over(window))
-      .filter(col("row_number") === 1) // Most recent version of this id×type pair
-      .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
-    val index = Common.transitiveClosure(osm, Some(spark.table("index")))
-
-    Common.saveBulk(osm.repartition(1), "osm_updates", "overwrite")
-    Common.saveIndex(index.repartition(1), "index_updates", "append")
+    logger.info("complete")
   }
 
   def close(): Unit = {
-    println("close")
+    logger.info("close")
+
+    val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
+    val osm = spark.createDataFrame(
+      spark.sparkContext.parallelize(rs.toList, 1),
+      StructType(Common.osmSchema))
+    // val lastLive = osm
+    //   .withColumn("rank", rank().over(window))
+    //   .filter(col("rank") === 1) // Most recent version of this id×type pair
+    //   .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
+    val edges = spark.table("index") // XXX
+    val index = ComputeIndexLocal(rs.toArray, edges)
+
+    Common.saveBulk(osm, "osm_updates", "overwrite")
+    Common.saveIndex(index, "index_updates", "overwrite")
   }
 
 }

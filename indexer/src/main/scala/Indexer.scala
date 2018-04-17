@@ -15,18 +15,14 @@ object Indexer {
 
     Common.denoise
 
-    val osm = spark.read.orc(args(0))
-    val index = Common.transitiveClosure(osm, None)
+    val osm = spark
+      .read.orc(args(0))
+      .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
+      .select(Common.osmColumns: _*)
+    val index = ComputeIndex(osm)
 
-    if (args.length > 1) {
-      val n = args(1).toInt
-      Common.saveBulk(osm.repartition(n), "osm", "overwrite")
-      Common.saveIndex(index.repartition(n), "index", "overwrite")
-    } else {
-      Common.saveBulk(osm, "osm", "overwrite")
-      Common.saveIndex(index, "index", "overwrite")
-    }
-
+    Common.saveBulk(osm, "osm", "overwrite")
+    Common.saveIndex(index, "index", "overwrite")
   }
 
 }

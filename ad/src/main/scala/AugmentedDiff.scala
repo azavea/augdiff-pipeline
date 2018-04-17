@@ -20,50 +20,43 @@ object AugmentedDiff {
   val spark = Common.sparkSession("Augmented Diff")
   import spark.implicits._
 
-  val window1 = Window.partitionBy("prior_id", "prior_type").orderBy(desc("instant"))
-  val window2 = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
 
-  def augment(rows: DataFrame) = {
-    val index =
-      spark.table("index").select(Common.indexColumns: _*)
-        .union(spark.table("index_updates").select(Common.indexColumns: _*))
-    val osm =
-      spark.table("osm").select(Common.osmColumns: _*)
-        .union(spark.table("osm_updates").select(Common.osmColumns: _*))
+  private val logger = {
+    val logger = Logger.getLogger(this.getClass)
+    logger.setLevel(Level.INFO)
+    logger
+  }
 
-    val dependents = index.as("left")
-      .join(
-        rows,
-        ((col("prior_id") === col("id")) &&
-         (col("prior_type") === col("type"))),
-        "left_semi")
-      .withColumn("row_number", row_number().over(window1))
-      .filter(col("row_number") === 1)
-      .select(col("dependent_id").as("id"), col("dependent_type").as("type"), col("instant"))
-      .union(rows.select(col("id"), col("type"), Common.getInstant(col("timestamp")).as("instant")))
-      .distinct // XXX
-      .select(col("id"), col("type"), col("instant"))
-    val priors = index.as("left")
-      .join(
-        dependents.as("right"),
-        ((col("left.dependent_id") === col("right.id")) &&
-         (col("left.dependent_type") === col("right.type"))),
-        "left_semi")
-      .withColumn("row_number", row_number().over(window1))
-      .filter(col("row_number") === 1)
-      .select(col("prior_id").as("id"), col("prior_type").as("type"), col("instant"))
-      .distinct // XXX
-      .select(col("id"), col("type"), col("instant"))
-    osm.as("left")
-      .join(
-        dependents.union(priors).as("right"),
-        ((col("left.id") === col("right.id")) &&
-         (col("left.type") === col("right.type")) &&
-         Common.getInstant(col("left.timestamp")) >= (col("right.instant"))),
-        "left_semi")
-      .withColumn("row_number", row_number().over(window2))
-      .filter(col("row_number") === 1)
-      .drop("row_number")
+  private def augment(rows: Array[Row]): Array[Row] = { // XXX too many timestamps
+    val index = spark.table("index").select(Common.edgeColumns: _*) // index
+      .union(spark.table("index_updates").select(Common.edgeColumns: _*))
+    val osm = spark.table("osm").select(Common.osmColumns: _*) // osm
+      .union(spark.table("osm_updates").select(Common.osmColumns: _*))
+    val desired1 = rows.map({ r => (r.getLong(1) /* id */, r.getString(2) /* type */) }).toSet
+
+    val pointers = Common.loadEdges(desired1, index)
+      .map({ r => (r.getLong(0) /* ap */, r.getLong(1) /* aid */, r.getString(2) /* atype */) })
+
+    val triples = pointers.groupBy(_._1)
+    val desired2 = pointers.map({ p => (p._2, p._3) })
+    logger.info(s"● Reading ${triples.size} partitions in groups of ${Common.pfLimit}")
+    val dfs = triples.grouped(Common.pfLimit).map({ _group =>
+      logger.info("● Reading group")
+      val group = _group.toArray
+      val ps = group.map({ kv => kv._1 })
+      val ids = group.flatMap({ kv => kv._2.map(_._2) }).distinct
+      val retval = osm.filter(col("p").isin(ps: _*))
+      if (ids.length < Common.idLimit)
+        retval.filter(col("id").isin(ids: _*))
+      else
+        retval
+    })
+
+    dfs.map({ df =>
+      df.select(Common.osmColumns: _*)
+        .collect
+        .filter({ r => desired2.contains((r.getLong(1) /* id */, r.getString(2) /* type */)) })
+    }).reduce(_ ++ _).distinct
   }
 
   def main(args: Array[String]): Unit = {
@@ -77,14 +70,21 @@ object AugmentedDiff {
       cr.run
     }
     else {
-      val updates = spark.table("osm_updates")
-      println(s"updates: ${updates.count}")
+      val updates = spark.table("osm_updates").select(Common.osmColumns: _*).collect
+      println(s"updates: ${updates.length}")
       val time1 = System.currentTimeMillis
-      println(s"size: ${augment(updates).count}")
+      println(s"size: ${augment(updates).length}")
       val time2 = System.currentTimeMillis
-      println(s"size: ${augment(updates).count}")
+      val augmented = augment(updates)
+      println(s"size: ${augmented.length}")
       val time3 = System.currentTimeMillis
       println(s"times: ${time2 - time1} ${time3 - time2}")
+
+      if ((args.length > 1) && (args(1) == "yyy")) {
+        updates.foreach({ row => println(s"◯ $row") })
+        println
+        augmented.foreach({ row => println(s"◯◯ $row") })
+      }
     }
   }
 

@@ -74,7 +74,6 @@ object ComputeIndex {
         ((col("left.bp") === col("right.ap")) && // Try to use partition pruning (may get better in some future version)
          (col("left.a_to_b") === col("right.a_to_b")) &&                                       // Arrows must point the same way
          (col("left.bid") === col("right.aid") && col("left.btype") === col("right.atype")) && // The two edges meet
-         (col("left.atype") === lit("relation") || col("right.btype") === lit("relation")) &&  // Transitive extensions only involve relations
          (col("left.aid") =!= col("right.bid") || col("left.atype") =!= col("right.btype"))),  // Do not join something to itself
         "inner")
       .select(
@@ -89,6 +88,7 @@ object ComputeIndex {
     logger.info(s"◻ Computing Index")
 
     val rightEdges = edgesFromRows(rows).select(Common.edgeColumnsPlus: _*)
+    val rightRelationEdges = rightEdges.filter(col("btype") === "relation")
     var outputEdges = rightEdges
     var leftEdges = rightEdges
     var iteration = 1L
@@ -96,7 +96,7 @@ object ComputeIndex {
     val window = Window.partitionBy("aid", "atype", "bid", "btype", "a_to_b").orderBy(desc("instant"))
 
     do {
-      val newEdges = transitiveStep(leftEdges, rightEdges, iteration).select(Common.edgeColumnsPlus: _*)
+      val newEdges = transitiveStep(leftEdges, rightRelationEdges, iteration).select(Common.edgeColumnsPlus: _*)
       leftEdges = leftEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       outputEdges = outputEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       iteration = iteration + 1L

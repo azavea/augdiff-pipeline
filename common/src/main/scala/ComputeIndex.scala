@@ -2,6 +2,7 @@ package osmdiff
 
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 
 
@@ -37,6 +38,7 @@ object ComputeIndex {
           Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
           col("bid"), col("btype"),
           lit(0L).as("iteration"))
+        .select(Common.edgeColumnsPlus: _*)
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
@@ -47,12 +49,12 @@ object ComputeIndex {
           explode(col("members")).as("members"))
         .select(
           Common.partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"),
-          col("members.ref").as("aid"),
-          col("members.type").as("atype"),
+          col("members.ref").as("aid"), col("members.type").as("atype"),
           col("instant"),
           Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
           col("bid"), col("btype"),
           lit(0L).as("iteration"))
+        .select(Common.edgeColumnsPlus: _*)
 
     halfEdgesFromNodes.union(halfEdgesFromRelations)
   }
@@ -86,6 +88,7 @@ object ComputeIndex {
     var leftEdges = rightEdges
     var iteration = 1L
     var keepGoing = false
+    val window = Window.partitionBy("aid", "atype", "bid", "btype").orderBy(desc("instant"))
 
     do {
       val newEdges = transitiveStep(leftEdges, rightEdges, iteration).select(Common.edgeColumnsPlus: _*)
@@ -97,6 +100,8 @@ object ComputeIndex {
 
     outputEdges.select(Common.edgeColumns: _*)
       .union(mirror(outputEdges).select(Common.edgeColumns: _*))
+      .withColumn("rank", rank().over(window)).filter(col("rank") === 1) // earliest of the latest
+      .select(Common.edgeColumns: _*)
   }
 
 }

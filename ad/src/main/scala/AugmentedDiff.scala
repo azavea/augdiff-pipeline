@@ -4,7 +4,6 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark._
 import org.apache.spark.rdd._
 import org.apache.spark.sql._
-import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 
 import org.openstreetmap.osmosis.xml.common.CompressionMethod

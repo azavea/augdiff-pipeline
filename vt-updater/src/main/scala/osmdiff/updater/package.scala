@@ -176,7 +176,7 @@ package object updater {
               val newFeatures = schema.newFeatures
 
               if (newFeatures.nonEmpty) {
-                logger.info(s"Adding ${newFeatures.length.formatted("%,d")} features")
+                logger.info(s"Writing ${newFeatures.length.formatted("%,d")} feature(s)")
               }
 
               unmodifiedFeatures ++ retainedFeatures ++ replacementFeatures ++ newFeatures match {

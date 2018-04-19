@@ -2,16 +2,16 @@ package osmdiff
 
 import java.io.ByteArrayInputStream
 import java.net.URI
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Path, Paths}
 
 import com.amazonaws.services.s3.model.{AmazonS3Exception, ObjectMetadata}
 import com.amazonaws.services.s3.{AmazonS3, AmazonS3ClientBuilder}
 import geotrellis.proj4.{LatLng, WebMercator}
 import geotrellis.spark.SpatialKey
 import geotrellis.spark.tiling.{LayoutDefinition, ZoomedLayoutScheme}
+import geotrellis.vector.io._
 import geotrellis.vector.{Extent, Feature, Geometry, Line, MultiLine, MultiPoint, MultiPolygon, Point, Polygon}
 import geotrellis.vectortile._
-import geotrellis.vector.io._
 import org.apache.commons.io.IOUtils
 import org.apache.log4j.Logger
 import osmdiff.updater.Implicits._
@@ -138,15 +138,26 @@ package object updater {
       .mapValues(_.map(_._2))
   }
 
-  def updateTiles(tileSource: URI, layerName: String, zoom: Int, schemaType: SchemaBuilder, features: Seq[AugmentedDiffFeature], process: (SpatialKey, VectorTile) => Any): Unit = {
-    val layout = LayoutScheme.levelForZoom(zoom).layout
-    val tiles = tile(features, layout)
+  def path(zoom: Int, sk: SpatialKey) = s"$zoom/${sk.col}/${sk.row}.mvt"
 
-    tiles
+  def updateTiles(tileSource: URI, layerName: String, zoom: Int, schemaType: SchemaBuilder, features: Seq[AugmentedDiffFeature], listing: Option[Path], process: (SpatialKey, VectorTile) => Any): Unit = {
+    val layout = LayoutScheme.levelForZoom(zoom).layout
+    val tiledFeatures = tile(features, layout)
+
+    val tiles = listing match {
+      case Some (l) =>
+        Source.fromFile(l.toFile).getLines.toSet
+      case None => Set.empty[String]
+    }
+
+    tiledFeatures
+      .filter {
+        case (sk, _) => tiles.isEmpty || tiles.contains(path(zoom, sk))
+      }
       .par
       .foreach {
         case (sk, feats) =>
-          val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
+          val filename = path(zoom, sk)
           val uri = tileSource.resolve(filename)
 
           read(uri) match {
@@ -176,7 +187,7 @@ package object updater {
               val newFeatures = schema.newFeatures
 
               if (newFeatures.nonEmpty) {
-                logger.info(s"Writing ${newFeatures.length.formatted("%,d")} feature(s)")
+                logger.info(s"Writing ${unmodifiedFeatures.length.formatted("%,d")} + ${newFeatures.length.formatted("%,d")} feature(s)")
               }
 
               unmodifiedFeatures ++ retainedFeatures ++ replacementFeatures ++ newFeatures match {

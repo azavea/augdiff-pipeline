@@ -2,6 +2,7 @@ package osmdiff.updater
 
 import java.io.File
 import java.net.URI
+import java.nio.file.Path
 
 import cats.implicits._
 import com.monovore.decline._
@@ -59,6 +60,12 @@ object TileUpdater extends CommandApp(
       .map {
         Schemas(_)
       }
+    val listingOpt = Opts.option[Path](
+      "tiles",
+      short = "T",
+      metavar = "tile list",
+      help = "List of tiles available for updating"
+    ).orNone
     val dryRunOpt = Opts.flag(
       "dry-run",
       short = "n",
@@ -73,9 +80,9 @@ object TileUpdater extends CommandApp(
 
     val logger = Logger.getLogger(classOf[TileUpdater])
 
-    (replicationSourceOpt, tileSourceOpt, layerNameOpt, minZoomOpt, maxZoomOpt, schemaOpt, dryRunOpt, verboseOpt,
-      sequenceOpt).mapN {
-      (replicationSource, tileSource, layerName, minZoom, maxZoom, schema, dryRun, verbose, sequence) =>
+    (replicationSourceOpt, tileSourceOpt, layerNameOpt, minZoomOpt, maxZoomOpt, schemaOpt, listingOpt, dryRunOpt,
+      verboseOpt, sequenceOpt).mapN {
+      (replicationSource, tileSource, layerName, minZoom, maxZoom, schema, listing, dryRun, verbose, sequence) =>
         val replicationUri = replicationSource.resolve(s"$sequence.json")
 
         if (verbose) {
@@ -85,22 +92,29 @@ object TileUpdater extends CommandApp(
         readFeatures(replicationUri) match {
           case Some(features) =>
             for (zoom <- minZoom to maxZoom) {
-              updateTiles(tileSource, layerName, zoom, schema, features, (sk, tile) => {
-                val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
-                val uri = tileSource.resolve(filename)
+              updateTiles(
+                tileSource = tileSource,
+                layerName = layerName,
+                zoom = zoom,
+                schemaType = schema,
+                features = features,
+                listing = listing,
+                process = (sk, tile) => {
+                  val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
+                  val uri = tileSource.resolve(filename)
 
-                if (dryRun) {
-                  println(s"Would write ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
-                } else {
-                  logger.info(s"Writing ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
-                  write(uri, tile.toBytes)
-                }
+                  if (dryRun) {
+                    println(s"Would write ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
+                  } else {
+                    logger.info(s"Writing ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
+                    write(uri, tile.toBytes)
+                  }
 
-                if (verbose) {
-                  println(filename)
-                }
-              })
-            }
+                  if (verbose) {
+                    println(filename)
+                  }
+                })
+              }
 
           case None =>
             println(s"No features available for $sequence")

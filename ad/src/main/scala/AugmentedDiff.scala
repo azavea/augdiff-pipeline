@@ -26,7 +26,7 @@ object AugmentedDiff {
     logger
   }
 
-  private def augment(rows: Array[Row]): Array[Row] = { // XXX too many timestamps
+  private def augment(rows: Array[Row]): Array[Row] = {
     val index = spark.table("index").select(Common.edgeColumns: _*) // index
       .union(spark.table("index_updates").select(Common.edgeColumns: _*))
     val osm = spark.table("osm").select(Common.osmColumns: _*) // osm
@@ -62,13 +62,12 @@ object AugmentedDiff {
 
     Common.denoise
 
-    if (args(0) != "xxx") {
+    if (args(0).endsWith(".osc")) {
       val cr = new XmlChangeReader(new File(args(0)), true, CompressionMethod.None)
       val ca = new ChangeAugmenter(spark)
       cr.setChangeSink(ca)
       cr.run
-    }
-    else {
+    } else if (args(0).endsWith(".json")) {
       val updates = spark.table("osm_updates").select(Common.osmColumns: _*).collect
       println(s"updates: ${updates.length}")
       val time1 = System.currentTimeMillis
@@ -79,11 +78,7 @@ object AugmentedDiff {
       val time3 = System.currentTimeMillis
       println(s"times: ${time2 - time1} ${time3 - time2}")
 
-      if ((args.length > 1) && (args(1) == "yyy")) {
-        updates.foreach({ row => println(s"◯ $row") })
-        println
-        augmented.foreach({ row => println(s"◯◯ $row") })
-      }
+      RowsToJson(args(0), augmented)
     }
   }
 

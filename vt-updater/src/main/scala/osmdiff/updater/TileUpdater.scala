@@ -76,10 +76,13 @@ object TileUpdater extends CommandApp(
     (replicationSourceOpt, tileSourceOpt, layerNameOpt, minZoomOpt, maxZoomOpt, schemaOpt, dryRunOpt, verboseOpt,
       sequenceOpt).mapN {
       (replicationSource, tileSource, layerName, minZoom, maxZoom, schema, dryRun, verbose, sequence) =>
-        logger.info(s"Fetching $sequence from $replicationSource and updating $tileSource from zoom $minZoom to " +
-          s"$maxZoom")
+        val replicationUri = replicationSource.resolve(s"$sequence.json")
 
-        readFeatures(replicationSource.resolve(s"$sequence.json")) match {
+        if (verbose) {
+          println(s"Applying $replicationUri to $tileSource from zoom $minZoom to $maxZoom...")
+        }
+
+        readFeatures(replicationUri) match {
           case Some(features) =>
             for (zoom <- minZoom to maxZoom) {
               updateTiles(tileSource, layerName, zoom, schema, features, (sk, tile) => {

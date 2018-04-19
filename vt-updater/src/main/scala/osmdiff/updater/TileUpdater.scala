@@ -5,11 +5,8 @@ import java.net.URI
 
 import cats.implicits._
 import com.monovore.decline._
-import geotrellis.vector.io._
 import org.apache.log4j.Logger
 import osmdiff.updater.schemas._
-
-import scala.io.Source
 
 class TileUpdater
 
@@ -82,31 +79,29 @@ object TileUpdater extends CommandApp(
         logger.info(s"Fetching $sequence from $replicationSource and updating $tileSource from zoom $minZoom to " +
           s"$maxZoom")
 
-        val source = Source.fromFile(replicationSource.resolve(s"$sequence.json"))
+        readFeatures(replicationSource.resolve(s"$sequence.json")) match {
+          case Some(features) =>
+            for (zoom <- minZoom to maxZoom) {
+              updateTiles(tileSource, layerName, zoom, schema, features, (sk, tile) => {
+                val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
+                val uri = tileSource.resolve(filename)
 
-        val features = source
-          .getLines
-          .map(_
-            .drop(1) // remove the record separator at the beginning of a JSON record
-            .parseGeoJson[AugmentedDiffFeature])
-          .toSeq // this will be iterated over multiple times
+                if (dryRun) {
+                  println(s"Would write ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
+                } else {
+                  logger.info(s"Writing ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
+                  write(uri, tile.toBytes)
+                }
 
-        for (zoom <- minZoom to maxZoom) {
-          updateTiles(tileSource, layerName, zoom, schema, features, (sk, tile) => {
-            val filename = s"$zoom/${sk.col}/${sk.row}.mvt"
-            val uri = tileSource.resolve(filename)
-
-            if (dryRun) {
-              println(s"Would write ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
-            } else {
-              logger.info(s"Writing ${tile.toBytes.length.formatted("%,d")} bytes to $uri")
-              write(uri, tile.toBytes)
+                if (verbose) {
+                  println(filename)
+                }
+              })
             }
 
-            if (verbose) {
-              println(filename)
-            }
-          })
+          case None =>
+            println(s"No features available for $sequence")
+            System.exit(1)
         }
     }
   }

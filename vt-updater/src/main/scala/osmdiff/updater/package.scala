@@ -11,11 +11,13 @@ import geotrellis.spark.SpatialKey
 import geotrellis.spark.tiling.{LayoutDefinition, ZoomedLayoutScheme}
 import geotrellis.vector.{Extent, Feature, Geometry, Line, MultiLine, MultiPoint, MultiPolygon, Point, Polygon}
 import geotrellis.vectortile._
+import geotrellis.vector.io._
 import org.apache.commons.io.IOUtils
 import org.apache.log4j.Logger
 import osmdiff.updater.Implicits._
 
 import scala.collection.mutable.ListBuffer
+import scala.io.Source
 import scala.util.{Failure, Success, Try}
 
 package object updater {
@@ -62,6 +64,42 @@ package object updater {
         } else {
           None
         }
+    }
+  }
+
+  def readFeatures(uri: URI): Option[Seq[AugmentedDiffFeature]] = {
+    val lines: Option[Seq[String]] = uri.getScheme match {
+      case "s3" =>
+        Try(IOUtils.toString(s3.getObject(uri.getHost, uri.getPath.drop(1)).getObjectContent)) match {
+          case Success(content) => Some(content.split("\n"))
+          case Failure(e) =>
+            e match {
+              case ex: AmazonS3Exception if ex.getErrorCode == "NoSuchKey" =>
+              case ex: AmazonS3Exception =>
+                logger.warn(s"Could not read $uri: ${ex.getMessage}")
+              case _ =>
+                logger.warn(s"Could not read $uri: $e")
+            }
+
+            None
+        }
+      case "file" =>
+        val path = Paths.get(uri)
+
+        if (Files.exists(path)) {
+          Some(Source.fromFile(uri).getLines.toSeq)
+        } else {
+          None
+        }
+    }
+
+    lines match {
+      case Some(ls) =>
+        Some(ls
+          .map(_
+            .drop(1) // remove the record separator at the beginning of a JSON record
+            .parseGeoJson[AugmentedDiffFeature]))
+      case None => None
     }
   }
 

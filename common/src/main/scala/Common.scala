@@ -130,7 +130,7 @@ object Common {
     dfs.foreach({ df =>
       s ++= df.select(edgeColumns: _*)
         .collect
-        .filter({ r => desired.contains((r.getLong(1) /* aid */, r.getString(2) /* atype */)) })
+        .filter({ r => desired.contains((r.getLong(5) /* bid */, r.getString(6) /* btype */)) })
     })
     s
   }

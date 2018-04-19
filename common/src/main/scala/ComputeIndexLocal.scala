@@ -16,16 +16,17 @@ object ComputeIndexLocal {
 
   private def edgesFromRows(rows: Array[Row]): Array[Row] = {
     val loops: Array[Row] =
-      rows.flatMap({ r =>
-        val id = r.getLong(1)                       /* id */
-        val tipe = r.getString(2)                   /* type */
-        val p = Common.partitionNumberFn(id, tipe)
-        val instant = r.getTimestamp(9).getTime     /* timestamp */
-        Array[Row](
-          Row(p, id, tipe, instant, p, id, tipe, true),
-          Row(p, id, tipe, instant, p, id, tipe, false)
-        )
-      })
+      rows
+        .flatMap({ r =>
+          val id = r.getLong(1)                       /* id */
+          val tipe = r.getString(2)                   /* type */
+          val p = Common.partitionNumberFn(id, tipe)
+          val instant = r.getTimestamp(9).getTime     /* timestamp */
+          Array[Row](
+            Row(p, id, tipe, instant, p, id, tipe, true),
+            Row(p, id, tipe, instant, p, id, tipe, false)
+          )
+        })
     val halfEdgesFromNodes: Array[Row] =
       rows
         .filter({ r => r.getString(2) /* type */ == "way" })

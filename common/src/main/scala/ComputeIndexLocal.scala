@@ -16,12 +16,15 @@ object ComputeIndexLocal {
 
   private def edgesFromRows(rows: Array[Row]): Array[Row] = {
     val loops: Array[Row] =
-      rows.map({ r =>
+      rows.flatMap({ r =>
         val id = r.getLong(1)                       /* id */
         val tipe = r.getString(2)                   /* type */
         val p = Common.partitionNumberFn(id, tipe)
         val instant = r.getTimestamp(9).getTime     /* timestamp */
-        Row(p, id, tipe, instant, p, id, tipe)
+        Array[Row](
+          Row(p, id, tipe, instant, p, id, tipe, true),
+          Row(p, id, tipe, instant, p, id, tipe, false)
+        )
       })
     val halfEdgesFromNodes: Array[Row] =
       rows
@@ -40,12 +43,14 @@ object ComputeIndexLocal {
             val forward = Row(
               ap, aid, atype,
               instant,
-              bp, bid, btype
+              bp, bid, btype,
+              true
             )
             val reverse = Row(
               bp, bid, btype,
               instant,
-              ap, aid, atype
+              ap, aid, atype,
+              false
               )
             Array[Row](forward, reverse)
           })
@@ -67,12 +72,14 @@ object ComputeIndexLocal {
             val forward = Row(
               ap, aid, atype,
               instant,
-              bp, bid, btype
+              bp, bid, btype,
+              true
             )
             val reverse = Row(
               bp, bid, btype,
               instant,
-              ap, aid, atype
+              ap, aid, atype,
+              false
             )
             Array[Row](forward, reverse)
           })
@@ -89,33 +96,37 @@ object ComputeIndexLocal {
     logger.info(s"◼ Transitive closure iteration=$iteration left=${leftEdges.size}")
     leftEdges
       .flatMap({ row1 => // Manual inner join
-        val leftAp = row1.getLong(0)      /* ap */
-        val leftAid = row1.getLong(1)     /* aid */
-        val leftAtype = row1.getString(2) /* atype */
-        val leftInstant = row1.getLong(3) /* instant */
-        val leftBp = row1.getLong(4)      /* bp */
-        val leftBid = row1.getLong(5)     /* bid */
-        val leftBtype = row1.getString(6) /* btype */
+        val leftAp = row1.getLong(0)           /* ap */
+        val leftAid = row1.getLong(1)          /* aid */
+        val leftAtype = row1.getString(2)      /* atype */
+        val leftInstant = row1.getLong(3)      /* instant */
+        val leftBp = row1.getLong(4)           /* bp */
+        val leftBid = row1.getLong(5)          /* bid */
+        val leftBtype = row1.getString(6)      /* btype */
+        val leftDirection = row1.getBoolean(7) /* a_to_b */
         val key = (leftBid, leftBtype)
 
         rightEdges.getOrElse(key, Array.empty[Row])
           .flatMap({ row2 =>
-            val rightAp = row2.getLong(0)      /* ap */
-            val rightAid = row2.getLong(1)     /* aid */
-            val rightAtype = row2.getString(2) /* atype */
-            val rightInstant = row2.getLong(3) /* instant */
-            val rightBp = row2.getLong(4)      /* bp */
-            val rightBid = row2.getLong(5)     /* bid */
-            val rightBtype = row2.getString(6) /* btype */
+            val rightAp = row2.getLong(0)           /* ap */
+            val rightAid = row2.getLong(1)          /* aid */
+            val rightAtype = row2.getString(2)      /* atype */
+            val rightInstant = row2.getLong(3)      /* instant */
+            val rightBp = row2.getLong(4)           /* bp */
+            val rightBid = row2.getLong(5)          /* bid */
+            val rightBtype = row2.getString(6)      /* btype */
+            val rightDirection = row2.getBoolean(7) /* a_to_b */
 
             if (leftBid != rightAid || leftBtype != rightAtype) None // The two edges must meet
+            else if (leftDirection != rightDirection) None // The edges must go in the same direction
             else if (leftAtype != "relation" && rightBtype != "relation") None // Extended chains are over relations
             else if (leftAid == rightBid && leftAtype == rightBtype) None // Do not join thing to itself
             else {
               Some(Row(
                 leftAp, leftAid, leftAtype,
                 math.max(leftInstant, rightInstant),
-                rightBp, rightBid, rightBtype
+                rightBp, rightBid, rightBtype,
+                leftDirection
               ))
             }
           })
@@ -129,11 +140,10 @@ object ComputeIndexLocal {
     logger.info(s"◼ Computing Index")
 
     val rightEdges: Array[Row] = edgesFromRows(rows)
-    val rightEdgesMap: Map[(Long, String), Array[Row]] =
+    val rightRelationEdgesMap: Map[(Long, String), Array[Row]] =
       rightEdges
-        .groupBy({ row =>
-          (row.getLong(1) /* aid */, row.getString(2) /* atype*/)
-        })
+        .filter({ row => row.getString(6) /* btype */ == "relation" })
+        .groupBy({ row => (row.getLong(1) /* aid */, row.getString(2) /* atype*/) })
     val desired = rightEdges.map({ r => (r.getLong(1) /* aid */, r.getString(2) /* atype */) }).toSet
     val outputEdges: mutable.Set[Row] = (mutable.Set.empty[Row] ++ rightEdges)
     val leftEdges: mutable.Set[Row] = (Common.loadEdges(desired, leftEdgesDf) ++= rightEdges)
@@ -141,7 +151,7 @@ object ComputeIndexLocal {
     var keepGoing = false
 
     do {
-      val newEdges = transitiveStep(leftEdges, rightEdgesMap, iteration)
+      val newEdges = transitiveStep(leftEdges, rightRelationEdgesMap, iteration)
       leftEdges ++= newEdges
       val before = outputEdges.size
       outputEdges ++= newEdges

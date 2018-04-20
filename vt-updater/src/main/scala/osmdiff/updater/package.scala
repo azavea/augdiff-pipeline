@@ -131,9 +131,8 @@ package object updater {
           .map { sk =>
             (sk, feat.mapGeom(_.intersection(sk.extent(layout)).toGeometry.orNull))
           }
-          .filter(_._2.isValid)
+          .filter(x => Option(x._2.geom).isDefined && x._2.isValid)
       }
-      .filter(x => Option(x._2).isDefined)
       .groupBy(_._1)
       .mapValues(_.map(_._2))
   }

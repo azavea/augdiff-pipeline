@@ -81,7 +81,11 @@ object ComputeIndex {
         lit(iteration).as("iteration"))
   }
 
-  def apply(rows: DataFrame, partitions: Option[Int] = None): DataFrame = {
+  def apply(
+    rows: DataFrame,
+    persistence: Option[StorageLevel],
+    partitions: Option[Int] = None
+  ): DataFrame = {
     logger.info(s"◻ Computing Index")
 
     val rightEdges = edgesFromRows(rows).select(Common.edgeColumnsPlus: _*)
@@ -93,16 +97,23 @@ object ComputeIndex {
     val window = Window.partitionBy("aid", "atype", "bid", "btype", "a_to_b").orderBy(desc("instant"))
 
     do {
-      val newEdges = partitions match {
-        case Some(n) =>
+      val newEdges = (persistence, partitions) match {
+        case (Some(level), Some(n)) =>
           transitiveStep(leftEdges, rightRelationEdges, iteration)
             .select(Common.edgeColumnsPlus: _*)
             .repartition(n)
-            .persist(StorageLevel.MEMORY_AND_DISK_SER)
-        case None =>
+            .persist(level)
+        case (Some(level), None) =>
           transitiveStep(leftEdges, rightRelationEdges, iteration)
             .select(Common.edgeColumnsPlus: _*)
-            .persist(StorageLevel.MEMORY_AND_DISK_SER)
+            .persist(level)
+        case (None, Some(n)) =>
+          transitiveStep(leftEdges, rightRelationEdges, iteration)
+            .select(Common.edgeColumnsPlus: _*)
+            .repartition(n)
+        case (None, None) =>
+          transitiveStep(leftEdges, rightRelationEdges, iteration)
+            .select(Common.edgeColumnsPlus: _*)
       }
       leftEdges = leftEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       outputEdges = outputEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)

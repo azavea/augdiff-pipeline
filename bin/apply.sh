@@ -36,9 +36,19 @@ fi
 echo "Starting at sequence $(echo $[$sequence + 1])"
 
 while true; do
-  sequence=$[$sequence + 1]
+  set +e
+  aws s3 ls ${replication_source}$((sequence + 1)).json > /dev/null
+  retcode=$?
+  set -e
 
-  $(dirname $0)/update-tiles -r $replication_source -t $tile_source -s urchn -l history -v $* $sequence
+  if [[ $retcode -eq 0 ]]; then
+    sequence=$[$sequence + 1]
 
-  echo $sequence | aws s3 cp - ${tile_source}sequence.txt
+    $(dirname $0)/update-tiles -r $replication_source -t $tile_source -s urchn -l history -v $* $sequence
+
+    echo $sequence | aws s3 cp - ${tile_source}sequence.txt
+  else
+    echo Waiting for $((sequence + 1))...
+    sleep 15
+  fi
 done

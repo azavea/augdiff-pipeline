@@ -4,6 +4,7 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
+import org.apache.spark.storage.StorageLevel
 
 
 object ComputeIndex {
@@ -33,11 +34,9 @@ object ComputeIndex {
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("nds")).as("nds"))
         .select(
-          Common.partitionNumberUdf(col("nds.ref"), lit("node")).as("ap"),
-          col("nds.ref").as("aid"), lit("node").as("atype"),
+          Common.partitionNumberUdf(col("nds.ref"), lit("node")).as("ap"), col("nds.ref").as("aid"), lit("node").as("atype"),
           col("instant"),
-          Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
-          col("bid"), col("btype"),
+          Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"), col("bid"), col("btype"),
           lit(true).as("a_to_b"),
           lit(0L).as("iteration"))
         .select(Common.edgeColumnsPlus: _*)
@@ -50,11 +49,9 @@ object ComputeIndex {
           Common.getInstant(col("timestamp")).as("instant"),
           explode(col("members")).as("members"))
         .select(
-          Common.partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"),
-          col("members.ref").as("aid"), col("members.type").as("atype"),
+          Common.partitionNumberUdf(col("members.ref"), col("members.type")).as("ap"), col("members.ref").as("aid"), col("members.type").as("atype"),
           col("instant"),
-          Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"),
-          col("bid"), col("btype"),
+          Common.partitionNumberUdf(col("bid"), col("btype")).as("bp"), col("bid"), col("btype"),
           lit(true).as("a_to_b"),
           lit(0L).as("iteration"))
         .select(Common.edgeColumnsPlus: _*)
@@ -84,7 +81,7 @@ object ComputeIndex {
         lit(iteration).as("iteration"))
   }
 
-  def apply(rows: DataFrame): DataFrame = {
+  def apply(rows: DataFrame, partitions: Option[Int] = None): DataFrame = {
     logger.info(s"◻ Computing Index")
 
     val rightEdges = edgesFromRows(rows).select(Common.edgeColumnsPlus: _*)
@@ -96,11 +93,21 @@ object ComputeIndex {
     val window = Window.partitionBy("aid", "atype", "bid", "btype", "a_to_b").orderBy(desc("instant"))
 
     do {
-      val newEdges = transitiveStep(leftEdges, rightRelationEdges, iteration).select(Common.edgeColumnsPlus: _*)
+      val newEdges = partitions match {
+        case Some(n) =>
+          transitiveStep(leftEdges, rightRelationEdges, iteration)
+            .select(Common.edgeColumnsPlus: _*)
+            .repartition(n)
+            .persist(StorageLevel.MEMORY_AND_DISK_SER)
+        case None =>
+          transitiveStep(leftEdges, rightRelationEdges, iteration)
+            .select(Common.edgeColumnsPlus: _*)
+            .persist(StorageLevel.MEMORY_AND_DISK_SER)
+      }
       leftEdges = leftEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       outputEdges = outputEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       iteration = iteration + 1L
-      keepGoing = (iteration < 33) && (!newEdges.rdd.isEmpty)
+      keepGoing = (iteration < 33) && (newEdges.count > 0)
     } while (keepGoing)
 
     outputEdges.select(Common.edgeColumns: _*)

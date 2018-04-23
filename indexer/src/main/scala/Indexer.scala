@@ -26,8 +26,20 @@ object Indexer extends CommandApp(
       Opts.option[Int]("partitions", help = "Number of partitions to use").orNone
     val persistence =
       Opts.option[String]("persistence", help = "Storage-level to use during indexing").orNone
+    val postgresHost =
+      Opts.option[String]("postgresHost", help = "PostgreSQL host").withDefault("localhost")
+    val postgresPort =
+      Opts.option[Int]("postgresPort", help = "PostgreSQL port").withDefault(5432)
+    val postgresUser =
+      Opts.option[String]("postgresUser", help = "PostgreSQL username").withDefault("hive")
+    val postgresPassword =
+      Opts.option[String]("postgresPassword", help = "PostgreSQL password").withDefault("hive")
+    val postgresDb =
+      Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
 
-    (orcfile, partitions, persistence).mapN({ (orcfile, partitions, _persistence) =>
+    (orcfile, partitions, persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
+      (orcfile, partitions, _persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+
       val persistence = _persistence match {
         case Some("memory_only") | Some("MEMORY_ONLY") => Some(StorageLevel.MEMORY_ONLY)
         case Some("memory_and_disk") | Some("MEMORY_AND_DISK") => Some(StorageLevel.MEMORY_AND_DISK)
@@ -37,6 +49,17 @@ object Indexer extends CommandApp(
         case Some("off_heap") | Some("OFF_HEAP") => Some(StorageLevel.OFF_HEAP)
         case _ => None
       }
+      val url = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
+      val props = {
+        val ps = new java.util.Properties()
+        ps.put("user", postgresUser)
+        ps.put("password", postgresPassword)
+        ps
+      }
+
+      import java.sql.DriverManager
+      val connection = DriverManager.getConnection(url, postgresUser, postgresPassword)
+      connection.isClosed()
 
       val osm = spark
         .read.orc(orcfile)

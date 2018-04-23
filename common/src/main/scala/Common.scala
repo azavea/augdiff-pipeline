@@ -4,7 +4,6 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
 
 import scala.collection.mutable
@@ -133,28 +132,6 @@ object Common {
         .filter({ r => desired.contains((r.getLong(5) /* bid */, r.getString(6) /* btype */)) })
     })
     s
-  }
-
-  def saveBulk(bulk: DataFrame, tableName: String, mode: String): Unit = {
-    logger.info(s"Writing bulk")
-    bulk
-      .orderBy("p", "id", "type")
-      .write
-      .mode(mode)
-      .format("orc")
-      .partitionBy("p")
-      .saveAsTable(tableName)
-  }
-
-  def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
-    logger.info(s"Writing index")
-    index
-      .orderBy("bp", "bid", "btype")
-      .write
-      .mode(mode)
-      .format("orc")
-      .partitionBy("bp")
-    .saveAsTable(tableName)
   }
 
 }

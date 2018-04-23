@@ -49,30 +49,25 @@ object Indexer extends CommandApp(
         case Some("off_heap") | Some("OFF_HEAP") => Some(StorageLevel.OFF_HEAP)
         case _ => None
       }
-      val url = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
+      val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
         val ps = new java.util.Properties()
         ps.put("user", postgresUser)
         ps.put("password", postgresPassword)
+        ps.put("driver", "org.postgresql.Driver")
         ps
       }
-
-      import java.sql.DriverManager
-      val connection = DriverManager.getConnection(url, postgresUser, postgresPassword)
-      connection.isClosed()
 
       val osm = spark
         .read.orc(orcfile)
         .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
         .select(Common.osmColumns: _*)
       val index = ComputeIndex(osm, persistence, partitions)
+      PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
+
       partitions match {
-        case Some(p) => Common.saveIndex(index.repartition(p), "index", "overwrite")
-        case None => Common.saveIndex(index, "index", "overwrite")
-      }
-      partitions match {
-        case Some(p) => Common.saveBulk(osm.repartition(p), "osm", "overwrite")
-        case None => Common.saveBulk(osm, "osm", "overwrite")
+        case Some(p) => OrcBackend.saveBulk(osm.repartition(p), "osm", "overwrite")
+        case None => OrcBackend.saveBulk(osm, "osm", "overwrite")
       }
 
     })

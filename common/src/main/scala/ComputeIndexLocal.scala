@@ -147,7 +147,7 @@ object ComputeIndexLocal {
         .groupBy({ row => (row.getLong(1) /* aid */, row.getString(2) /* atype*/) })
     val desired = rightEdges.map({ r => (r.getLong(1) /* aid */, r.getString(2) /* atype */) }).toSet
     val outputEdges: mutable.Set[Row] = (mutable.Set.empty[Row] ++ rightEdges)
-    val leftEdges: mutable.Set[Row] = (Common.loadEdges(desired, leftEdgesDf) ++= rightEdges)
+    val leftEdges: mutable.Set[Row] = (OrcBackend.loadEdges(desired, leftEdgesDf) ++= rightEdges)
     var iteration = 1L
     var keepGoing = false
 

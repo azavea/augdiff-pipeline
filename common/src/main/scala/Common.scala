@@ -6,8 +6,6 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 
-import scala.collection.mutable
-
 
 object Common {
 
@@ -131,28 +129,6 @@ object Common {
   def denoise(): Unit = {
     Logger.getLogger("org").setLevel(Level.ERROR)
     Logger.getLogger("akka").setLevel(Level.ERROR)
-  }
-
-  def loadEdges(desired: Set[(Long, String)], edges: DataFrame): mutable.Set[Row] = { // XXX too many instants
-    val pairs = desired.groupBy({ pair => partitionNumberFn(pair._1, pair._2) })
-    logger.info(s"◼ Reading ${pairs.size} partitions in groups of ${pfLimit}") // 175 bug (pfLimit <= 175)
-    val dfs = pairs.grouped(pfLimit).map({ _group =>
-      logger.info("◼ Reading group")
-      val group = _group.toArray
-      val ps = group.map({ kv => kv._1 })
-      val ids = group.flatMap({ kv => kv._2.map(_._1) }).distinct
-      val retval = edges.filter(col("bp").isin(ps: _*)) // partition pruning
-      if (ids.length < idLimit)
-        retval.filter(col("bid").isin(ids: _*)) // predicate pushdown
-      else retval
-    })
-    val s = mutable.Set.empty[Row]
-    dfs.foreach({ df =>
-      s ++= df.select(edgeColumns: _*)
-        .collect
-        .filter({ r => desired.contains((r.getLong(5) /* bid */, r.getString(6) /* btype */)) })
-    })
-    s
   }
 
 }

@@ -108,7 +108,6 @@ class ChangeAugmenter(
     logger
   }
 
-
   def process(ct: ChangeContainer): Unit = {
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
@@ -137,15 +136,11 @@ class ChangeAugmenter(
     val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(rs.toList, 1),
       StructType(Common.osmSchema))
-    // val lastLive = osm
-    //   .withColumn("rank", rank().over(window))
-    //   .filter(col("rank") === 1) // Most recent version of this id×type pair
-    //   .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
-    val edges = spark.table("index") // XXX
+    val edges = spark.table("index")
     val index = ComputeIndexLocal(rs.toArray, edges)
 
     OrcBackend.saveBulk(osm, "osm_updates", "overwrite")
-    PostgresBackend.saveIndex(index, uri, props, "index_updates", "overwrite")
+    PostgresBackend.saveIndex(index, uri, props, "index", "append")
   }
 
 }

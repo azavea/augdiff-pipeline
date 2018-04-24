@@ -32,7 +32,7 @@ object AugmentedDiff {
       .union(spark.table("osm_updates").select(Common.osmColumns: _*))
     val desired1 = rows.map({ r => (r.getLong(1) /* id */, r.getString(2) /* type */) }).toSet
 
-    val pointers = Common.loadEdges(desired1, index)
+    val pointers = OrcBackend.loadEdges(desired1, index)
       .map({ r => (r.getLong(0) /* ap */, r.getLong(1) /* aid */, r.getString(2) /* atype */) })
 
     val triples = pointers.groupBy(_._1)

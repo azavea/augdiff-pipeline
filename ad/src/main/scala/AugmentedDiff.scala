@@ -26,35 +26,36 @@ object AugmentedDiff {
   }
 
   def augment(spark: SparkSession, rows: Array[Row]): Array[Row] = {
-    val index = spark.table("index").select(Common.edgeColumns: _*) // index
-      .union(spark.table("index_updates").select(Common.edgeColumns: _*))
-    val osm = spark.table("osm").select(Common.osmColumns: _*) // osm
-      .union(spark.table("osm_updates").select(Common.osmColumns: _*))
-    val desired1 = rows.map({ r => (r.getLong(1) /* id */, r.getString(2) /* type */) }).toSet
+    // val index = spark.table("index").select(Common.edgeColumns: _*) // index
+    //   .union(spark.table("index_updates").select(Common.edgeColumns: _*))
+    // val osm = spark.table("osm").select(Common.osmColumns: _*) // osm
+    //   .union(spark.table("osm_updates").select(Common.osmColumns: _*))
+    // val desired1 = rows.map({ r => (r.getLong(1) /* id */, r.getString(2) /* type */) }).toSet
 
-    val pointers = OrcBackend.loadEdges(desired1, index)
-      .map({ r => (r.getLong(0) /* ap */, r.getLong(1) /* aid */, r.getString(2) /* atype */) })
+    // val pointers = OrcBackend.loadEdges(desired1, index)
+    //   .map({ r => (r.getLong(0) /* ap */, r.getLong(1) /* aid */, r.getString(2) /* atype */) })
 
-    val triples = pointers.groupBy(_._1)
-    val desired2 = pointers.map({ p => (p._2, p._3) })
-    logger.info(s"● Reading ${triples.size} partitions in groups of ${Common.pfLimit}")
-    val dfs = triples.grouped(Common.pfLimit).map({ _group =>
-      logger.info("● Reading group")
-      val group = _group.toArray
-      val ps = group.map({ kv => kv._1 })
-      val ids = group.flatMap({ kv => kv._2.map(_._2) }).distinct
-      val retval = osm.filter(col("p").isin(ps: _*))
-      if (ids.length < Common.idLimit)
-        retval.filter(col("id").isin(ids: _*))
-      else
-        retval
-    })
+    // val triples = pointers.groupBy(_._1)
+    // val desired2 = pointers.map({ p => (p._2, p._3) })
+    // logger.info(s"● Reading ${triples.size} partitions in groups of ${Common.pfLimit}")
+    // val dfs = triples.grouped(Common.pfLimit).map({ _group =>
+    //   logger.info("● Reading group")
+    //   val group = _group.toArray
+    //   val ps = group.map({ kv => kv._1 })
+    //   val ids = group.flatMap({ kv => kv._2.map(_._2) }).distinct
+    //   val retval = osm.filter(col("p").isin(ps: _*))
+    //   if (ids.length < Common.idLimit)
+    //     retval.filter(col("id").isin(ids: _*))
+    //   else
+    //     retval
+    // })
 
-    dfs.map({ df =>
-      df.select(Common.osmColumns: _*)
-        .collect
-        .filter({ r => desired2.contains((r.getLong(1) /* id */, r.getString(2) /* type */)) })
-    }).reduce(_ ++ _).distinct
+    // dfs.map({ df =>
+    //   df.select(Common.osmColumns: _*)
+    //     .collect
+    //     .filter({ r => desired2.contains((r.getLong(1) /* id */, r.getString(2) /* type */)) })
+    // }).reduce(_ ++ _).distinct
+    ???
   }
 
 }

@@ -37,7 +37,7 @@ object OrcBackend {
     .saveAsTable(tableName)
   }
 
-  def loadEdges(desired: Set[(Long, String)], edges: DataFrame): mutable.Set[Row] = { // XXX too many instants
+  def loadEdges(desired: Set[(Long, String)], edges: DataFrame): mutable.Set[Row] = {
     val pairs = desired.groupBy({ pair => Common.partitionNumberFn(pair._1, pair._2) })
     logger.info(s"◼ Reading ${pairs.size} partitions in groups of ${Common.pfLimit}") // 175 bug (pfLimit <= 175)
     val dfs = pairs.grouped(Common.pfLimit).map({ _group =>

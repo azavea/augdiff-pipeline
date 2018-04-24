@@ -136,8 +136,7 @@ class ChangeAugmenter(
     val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(rs.toList, 1),
       StructType(Common.osmSchema))
-    val edges = spark.table("index")
-    val index = ComputeIndexLocal(rs.toArray, edges)
+    val index = ComputeIndexLocal(rs.toArray, uri, props)
 
     OrcBackend.saveBulk(osm, "osm_updates", "overwrite")
     PostgresBackend.saveIndex(index, uri, props, "index", "append")

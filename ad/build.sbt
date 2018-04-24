@@ -2,6 +2,7 @@ name := "ad"
 
 libraryDependencies ++= Seq(
   "com.amazonaws"             % "aws-java-sdk"  % "1.7.4",
+  "com.monovore"             %% "decline"       % "0.4.1",
   "io.circe"                 %% "circe-core"    % "0.9.3",
   "io.circe"                 %% "circe-generic" % "0.9.3",
   "io.circe"                 %% "circe-parser"  % "0.9.3",

@@ -17,7 +17,6 @@ import java.sql.Timestamp
 
 
 object ChangeAugmenter {
-
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
     val tags = Map.empty[String,String]
@@ -96,7 +95,9 @@ object ChangeAugmenter {
 
 }
 
-class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
+class ChangeAugmenter(
+  spark: SparkSession, uri: String, props: java.util.Properties
+) extends ChangeSink {
   import ChangeAugmenter._
 
   val rs = mutable.ArrayBuffer.empty[Row]
@@ -143,8 +144,8 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     val edges = spark.table("index") // XXX
     val index = ComputeIndexLocal(rs.toArray, edges)
 
-    Common.saveBulk(osm, "osm_updates", "overwrite")
-    Common.saveIndex(index, "index_updates", "overwrite")
+    OrcBackend.saveBulk(osm, "osm_updates", "overwrite")
+    PostgresBackend.saveIndex(index, uri, props, "index_updates", "overwrite")
   }
 
 }

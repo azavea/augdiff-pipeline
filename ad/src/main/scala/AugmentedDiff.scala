@@ -13,12 +13,11 @@ import scala.collection.mutable
 
 import java.io.File
 
+import cats.implicits._
+import com.monovore.decline._
+
 
 object AugmentedDiff {
-
-  val spark = Common.sparkSession("Augmented Diff")
-  import spark.implicits._
-
 
   private val logger = {
     val logger = Logger.getLogger(this.getClass)
@@ -26,7 +25,7 @@ object AugmentedDiff {
     logger
   }
 
-  private def augment(rows: Array[Row]): Array[Row] = {
+  def augment(spark: SparkSession, rows: Array[Row]): Array[Row] = {
     val index = spark.table("index").select(Common.edgeColumns: _*) // index
       .union(spark.table("index_updates").select(Common.edgeColumns: _*))
     val osm = spark.table("osm").select(Common.osmColumns: _*) // osm
@@ -58,28 +57,67 @@ object AugmentedDiff {
     }).reduce(_ ++ _).distinct
   }
 
-  def main(args: Array[String]): Unit = {
+}
+
+object AugmentedDiffApp extends CommandApp(
+  name = "Augmented Differ",
+  header = "Augment diffs",
+  main = {
+    val spark = Common.sparkSession("Augmented Diff")
+    import spark.implicits._
 
     Common.denoise
 
-    if (args(0).endsWith(".osc")) {
-      val cr = new XmlChangeReader(new File(args(0)), true, CompressionMethod.None)
-      val ca = new ChangeAugmenter(spark)
-      cr.setChangeSink(ca)
-      cr.run
-    } else if (args(0).endsWith(".json")) {
-      val updates = spark.table("osm_updates").select(Common.osmColumns: _*).collect
-      println(s"updates: ${updates.length}")
-      val time1 = System.currentTimeMillis
-      println(s"size: ${augment(updates).length}")
-      val time2 = System.currentTimeMillis
-      val augmented = augment(updates)
-      println(s"size: ${augmented.length}")
-      val time3 = System.currentTimeMillis
-      println(s"times: ${time2 - time1} ${time3 - time2}")
+    val oscfile =
+      Opts.option[String]("oscfile", help = "OSC file containing OSM data").orNone
+    val jsonfile =
+      Opts.option[String]("jsonfile", help = "JSON file containing augmented diff").orNone
+    val postgresHost =
+      Opts.option[String]("postgresHost", help = "PostgreSQL host").withDefault("localhost")
+    val postgresPort =
+      Opts.option[Int]("postgresPort", help = "PostgreSQL port").withDefault(5432)
+    val postgresUser =
+      Opts.option[String]("postgresUser", help = "PostgreSQL username").withDefault("hive")
+    val postgresPassword =
+      Opts.option[String]("postgresPassword", help = "PostgreSQL password").withDefault("hive")
+    val postgresDb =
+      Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
 
-      RowsToJson(args(0), augmented)
-    }
+    (oscfile, jsonfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
+      (oscfile, jsonfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+
+      val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
+      val props = {
+        val ps = new java.util.Properties()
+        ps.put("user", postgresUser)
+        ps.put("password", postgresPassword)
+        ps.put("driver", "org.postgresql.Driver")
+        ps
+      }
+
+      oscfile match {
+        case Some(oscfile) =>
+          val cr = new XmlChangeReader(new File(oscfile), true, CompressionMethod.None)
+          val ca = new ChangeAugmenter(spark, uri, props)
+          cr.setChangeSink(ca)
+          cr.run
+        case None =>
+      }
+
+      jsonfile match {
+        case Some(jsonfile) =>
+          val updates = spark.table("osm_updates").select(Common.osmColumns: _*).collect
+          println(s"updates: ${updates.length}")
+          val time1 = System.currentTimeMillis
+          println(s"size: ${AugmentedDiff.augment(spark, updates).length}")
+          val time2 = System.currentTimeMillis
+          val augmented = AugmentedDiff.augment(spark, updates)
+          println(s"size: ${augmented.length}")
+          val time3 = System.currentTimeMillis
+          println(s"times: ${time2 - time1} ${time3 - time2}")
+          RowsToJson(jsonfile, augmented)
+        case None =>
+      }
+    })
   }
-
-}
+)

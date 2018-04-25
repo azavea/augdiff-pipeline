@@ -4,10 +4,7 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
-
-import scala.collection.mutable
 
 
 object Common {
@@ -36,6 +33,30 @@ object Common {
 
   private val bits = 16
 
+  def pairToLongFn(id: Long, tipe: String): Long = {
+    val typeBits = tipe match {
+      case "node" => 0x0
+      case "way" => 0x1
+      case "relation" => 0x2
+      case _ => throw new Exception(s"pairToLongFn($id, $tipe)")
+    }
+    (id<<2) | typeBits
+  }
+  val pairToLongUdf = udf({ (id: Long, tipe: String) => pairToLongFn(id, tipe) })
+
+  def longToIdFn(long: Long): Long = (long>>2)
+  val longToIdUdf = udf({ (long: Long) => longToIdFn(long) })
+
+  def longToTypeFn(long: Long): String = {
+    (long & 0x3) match {
+      case 0 => "node"
+      case 1 => "way"
+      case 2 => "relation"
+      case _ => throw new Exception(s"longToTypeFn($long)")
+    }
+  }
+  val longToTypeUdf = udf({ (long: Long) => longToTypeFn(long) })
+
   def partitionNumberFn(id: Long, tipe: String): Long = {
     var a = id
     while (a > ((1L)<<(bits-1))) {
@@ -45,13 +66,11 @@ object Common {
       case "node" => 0L
       case "way" => 1L
       case "relation" => 2L
+      case _ => throw new Exception(s"partitionNumberFn($id, $tipe)")
     }
     a ^ b
   }
-
-  val partitionNumberUdf = udf({ (id: Long, tipe: String) =>
-    partitionNumberFn(id, tipe)
-  })
+  val partitionNumberUdf = udf({ (id: Long, tipe: String) => partitionNumberFn(id, tipe) })
 
   val larger = udf({ (x: Long, y: Long) => math.max(x,y) })
 
@@ -111,50 +130,6 @@ object Common {
   def denoise(): Unit = {
     Logger.getLogger("org").setLevel(Level.ERROR)
     Logger.getLogger("akka").setLevel(Level.ERROR)
-  }
-
-  def loadEdges(desired: Set[(Long, String)], edges: DataFrame): mutable.Set[Row] = { // XXX too many instants
-    val pairs = desired.groupBy({ pair => partitionNumberFn(pair._1, pair._2) })
-    logger.info(s"◼ Reading ${pairs.size} partitions in groups of ${pfLimit}") // 175 bug (pfLimit <= 175)
-    val dfs = pairs.grouped(pfLimit).map({ _group =>
-      logger.info("◼ Reading group")
-      val group = _group.toArray
-      val ps = group.map({ kv => kv._1 })
-      val ids = group.flatMap({ kv => kv._2.map(_._1) }).distinct
-      val retval = edges.filter(col("bp").isin(ps: _*)) // partition pruning
-      if (ids.length < idLimit)
-        retval.filter(col("bid").isin(ids: _*)) // predicate pushdown
-      else retval
-    })
-    val s = mutable.Set.empty[Row]
-    dfs.foreach({ df =>
-      s ++= df.select(edgeColumns: _*)
-        .collect
-        .filter({ r => desired.contains((r.getLong(5) /* bid */, r.getString(6) /* btype */)) })
-    })
-    s
-  }
-
-  def saveBulk(bulk: DataFrame, tableName: String, mode: String): Unit = {
-    logger.info(s"Writing bulk")
-    bulk
-      .orderBy("p", "id", "type")
-      .write
-      .mode(mode)
-      .format("orc")
-      .partitionBy("p")
-      .saveAsTable(tableName)
-  }
-
-  def saveIndex(index: DataFrame, tableName: String, mode: String): Unit = {
-    logger.info(s"Writing index")
-    index
-      .orderBy("bp", "bid", "btype")
-      .write
-      .mode(mode)
-      .format("orc")
-      .partitionBy("bp")
-    .saveAsTable(tableName)
   }
 
 }

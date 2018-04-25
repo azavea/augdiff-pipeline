@@ -113,7 +113,7 @@ object RowsToJson {
         }
       })
 
-    val fos = new FileOutputStream(new File(filename), true)
+    val fos = new FileOutputStream(new File(filename))
     val p = new java.io.PrintWriter(fos)
     var i = 0; while (i < lines.length) {
       p.write(lines(i)+"\n")

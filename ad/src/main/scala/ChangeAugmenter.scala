@@ -2,7 +2,6 @@ package osmdiff
 
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
-import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 
@@ -17,7 +16,6 @@ import java.sql.Timestamp
 
 
 object ChangeAugmenter {
-
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
     val tags = Map.empty[String,String]
@@ -96,7 +94,9 @@ object ChangeAugmenter {
 
 }
 
-class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
+class ChangeAugmenter(
+  spark: SparkSession, uri: String, props: java.util.Properties
+) extends ChangeSink {
   import ChangeAugmenter._
 
   val rs = mutable.ArrayBuffer.empty[Row]
@@ -106,7 +106,6 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
     logger.setLevel(Level.INFO)
     logger
   }
-
 
   def process(ct: ChangeContainer): Unit = {
     ct.getAction match {
@@ -132,19 +131,14 @@ class ChangeAugmenter(spark: SparkSession) extends ChangeSink {
   def close(): Unit = {
     logger.info("close")
 
-    val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
     val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(rs.toList, 1),
       StructType(Common.osmSchema))
-    // val lastLive = osm
-    //   .withColumn("rank", rank().over(window))
-    //   .filter(col("rank") === 1) // Most recent version of this id×type pair
-    //   .select(col("id"), col("type"), col("timestamp"), col("visible"), col("nds"), col("members"))
-    val edges = spark.table("index") // XXX
-    val index = ComputeIndexLocal(rs.toArray, edges)
+    val index = ComputeIndexLocal(rs.toArray, uri, props)
 
-    Common.saveBulk(osm, "osm_updates", "overwrite")
-    Common.saveIndex(index, "index_updates", "overwrite")
+    OrcBackend.saveBulk(osm, "inbox", "overwrite")
+    OrcBackend.saveBulk(osm, "osm", "append")
+    PostgresBackend.saveIndex(index, uri, props, "index")
   }
 
 }

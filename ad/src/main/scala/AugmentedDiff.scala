@@ -25,37 +25,47 @@ object AugmentedDiff {
     logger
   }
 
-  def augment(spark: SparkSession, rows: Array[Row]): Array[Row] = {
-    // val index = spark.table("index").select(Common.edgeColumns: _*) // index
-    //   .union(spark.table("index_updates").select(Common.edgeColumns: _*))
-    // val osm = spark.table("osm").select(Common.osmColumns: _*) // osm
-    //   .union(spark.table("osm_updates").select(Common.osmColumns: _*))
-    // val desired1 = rows.map({ r => (r.getLong(1) /* id */, r.getString(2) /* type */) }).toSet
+  def augment(
+    spark: SparkSession,
+    rows: Array[Row],
+    uri: String, props: java.util.Properties
+  ): Array[Row] = {
+    val osm = spark.table("osm").select(Common.osmColumns: _*)
+    val rowLongs = rows.map({ row =>
+      val id = row.getLong(1)
+      val tipe = row.getString(2)
+      Common.pairToLongFn(id, tipe)
+    }).toSet
+    val triples = PostgresBackend.loadEdges(rowLongs, uri, props)
+      .map({ edge =>
+        val long = if (edge.direction == true) edge.a ; else edge.b
+        val id = Common.longToIdFn(long)
+        val tipe = Common.longToTypeFn(long)
+        val p = Common.partitionNumberFn(id, tipe)
+        (p, id, tipe)
+      })
+    val desired = triples.map({ triple => (triple._2, triple._3) })
+    val keyedTriples = triples.groupBy(_._1)
 
-    // val pointers = OrcBackend.loadEdges(desired1, index)
-    //   .map({ r => (r.getLong(0) /* ap */, r.getLong(1) /* aid */, r.getString(2) /* atype */) })
+    logger.info(s"● Reading ${keyedTriples.size} partitions in groups of ${Common.pfLimit}")
+    val dfs: Iterator[DataFrame] = keyedTriples.grouped(Common.pfLimit).map({ triples =>
+      logger.info("● Reading group")
+      val ps: Array[Long] = triples.map(_._1).toArray
+      val ids: Array[Long] = triples.map(_._2).reduce(_ ++ _).map(_._2).toArray
+      val retval: DataFrame = osm.filter(col("p").isin(ps: _*))
+      if (ids.length < Common.idLimit)
+        retval.filter(col("id").isin(ids: _*))
+      else
+        retval
+    })
 
-    // val triples = pointers.groupBy(_._1)
-    // val desired2 = pointers.map({ p => (p._2, p._3) })
-    // logger.info(s"● Reading ${triples.size} partitions in groups of ${Common.pfLimit}")
-    // val dfs = triples.grouped(Common.pfLimit).map({ _group =>
-    //   logger.info("● Reading group")
-    //   val group = _group.toArray
-    //   val ps = group.map({ kv => kv._1 })
-    //   val ids = group.flatMap({ kv => kv._2.map(_._2) }).distinct
-    //   val retval = osm.filter(col("p").isin(ps: _*))
-    //   if (ids.length < Common.idLimit)
-    //     retval.filter(col("id").isin(ids: _*))
-    //   else
-    //     retval
-    // })
-
-    // dfs.map({ df =>
-    //   df.select(Common.osmColumns: _*)
-    //     .collect
-    //     .filter({ r => desired2.contains((r.getLong(1) /* id */, r.getString(2) /* type */)) })
-    // }).reduce(_ ++ _).distinct
-    ???
+    dfs
+      .map({ df =>
+        df.select(Common.osmColumns: _*)
+          .collect
+          .filter({ row => desired.contains((row.getLong(1) /* id */, row.getString(2) /* type */)) })
+      })
+      .reduce(_ ++ _).distinct
   }
 
 }
@@ -107,12 +117,12 @@ object AugmentedDiffApp extends CommandApp(
 
       jsonfile match {
         case Some(jsonfile) =>
-          val updates = spark.table("osm_updates").select(Common.osmColumns: _*).collect
+          val updates = spark.table("inbox").select(Common.osmColumns: _*).collect
           println(s"updates: ${updates.length}")
           val time1 = System.currentTimeMillis
-          println(s"size: ${AugmentedDiff.augment(spark, updates).length}")
+          println(s"size: ${AugmentedDiff.augment(spark, updates, uri, props).length}")
           val time2 = System.currentTimeMillis
-          val augmented = AugmentedDiff.augment(spark, updates)
+          val augmented = AugmentedDiff.augment(spark, updates, uri, props)
           println(s"size: ${augmented.length}")
           val time3 = System.currentTimeMillis
           println(s"times: ${time2 - time1} ${time3 - time2}")

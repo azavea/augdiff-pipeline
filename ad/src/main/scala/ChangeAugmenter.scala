@@ -2,7 +2,6 @@ package osmdiff
 
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
-import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 
@@ -132,14 +131,14 @@ class ChangeAugmenter(
   def close(): Unit = {
     logger.info("close")
 
-    val window = Window.partitionBy("id", "type").orderBy(desc("timestamp"))
     val osm = spark.createDataFrame(
       spark.sparkContext.parallelize(rs.toList, 1),
       StructType(Common.osmSchema))
     val index = ComputeIndexLocal(rs.toArray, uri, props)
 
-    OrcBackend.saveBulk(osm, "osm_updates", "overwrite")
-    PostgresBackend.saveIndex(index, uri, props, "index", "append")
+    OrcBackend.saveBulk(osm, "inbox", "overwrite")
+    OrcBackend.saveBulk(osm, "osm", "append")
+    PostgresBackend.saveIndex(index, uri, props, "index")
   }
 
 }

@@ -34,13 +34,13 @@ object Common {
   private val bits = 16
 
   def pairToLongFn(id: Long, tipe: String): Long = {
-    val tipeBits = tipe match {
-      case "node" => 0
-      case "way" => 1
-      case "relation" => 2
-      case _ => throw new Exception
+    val typeBits = tipe match {
+      case "node" => 0x0
+      case "way" => 0x1
+      case "relation" => 0x2
+      case _ => throw new Exception(s"pairToLongFn($id, $tipe)")
     }
-    (id<<2) | tipeBits
+    (id<<2) | typeBits
   }
   val pairToLongUdf = udf({ (id: Long, tipe: String) => pairToLongFn(id, tipe) })
 
@@ -48,11 +48,11 @@ object Common {
   val longToIdUdf = udf({ (long: Long) => longToIdFn(long) })
 
   def longToTypeFn(long: Long): String = {
-    (long & 3) match {
+    (long & 0x3) match {
       case 0 => "node"
       case 1 => "way"
       case 2 => "relation"
-      case _ => throw new Exception
+      case _ => throw new Exception(s"longToTypeFn($long)")
     }
   }
   val longToTypeUdf = udf({ (long: Long) => longToTypeFn(long) })
@@ -66,6 +66,7 @@ object Common {
       case "node" => 0L
       case "way" => 1L
       case "relation" => 2L
+      case _ => throw new Exception(s"partitionNumberFn($id, $tipe)")
     }
     a ^ b
   }

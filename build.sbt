@@ -38,10 +38,14 @@ lazy val root = (project in file("."))
 lazy val common = (project in file("common"))
   .settings(commonSettings: _*)
 
+lazy val osmesa = (project in file("osmesa"))
+  .settings(commonSettings: _*)
+
 lazy val indexer = (project in file ("indexer"))
   .dependsOn(common)
   .settings(commonSettings: _*)
 
 lazy val ad = (project in file ("ad"))
   .dependsOn(common)
+  .dependsOn(osmesa)
   .settings(commonSettings: _*)

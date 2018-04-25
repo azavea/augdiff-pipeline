@@ -19,7 +19,7 @@ import com.monovore.decline._
 
 object AugmentedDiff {
 
-  private val logger = {
+  val logger = {
     val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
     logger
@@ -118,15 +118,10 @@ object AugmentedDiffApp extends CommandApp(
       jsonfile match {
         case Some(jsonfile) =>
           val updates = spark.table("inbox").select(Common.osmColumns: _*).collect
-          println(s"updates: ${updates.length}")
           val time1 = System.currentTimeMillis
-          println(s"size: ${AugmentedDiff.augment(spark, updates, uri, props).length}")
+          RowsToJson(jsonfile, AugmentedDiff.augment(spark, updates, uri, props))
           val time2 = System.currentTimeMillis
-          val augmented = AugmentedDiff.augment(spark, updates, uri, props)
-          println(s"size: ${augmented.length}")
-          val time3 = System.currentTimeMillis
-          println(s"times: ${time2 - time1} ${time3 - time2}")
-          RowsToJson(jsonfile, augmented)
+          AugmentedDiff.logger.info(s"Augmented diff produced in ${time2 - time1} ms")
         case None =>
       }
     })

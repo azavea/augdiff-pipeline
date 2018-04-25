@@ -1,0 +1,25 @@
+{
+    "image": "${batch_image_url}",
+    "vcpus": 8,
+    "memory": 8192,
+    "command": [
+    ],
+    "environment": [
+        {
+          "name": "METASTORE_ADDRESS",
+          "value": "${metastore_address}"
+        },
+        {
+          "name": "METASTORE_USERNAME",
+         "value": "${metastore_username}"
+        },
+        {
+          "name": "METASTORE_PASSWORD",
+          "value": "${metastore_password}"
+        },
+        {
+          "name": "METASTORE_DATABASE",
+          "value": "${metastore_database}"
+        }
+    ]
+}

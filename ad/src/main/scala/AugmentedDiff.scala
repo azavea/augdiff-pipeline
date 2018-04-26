@@ -29,7 +29,7 @@ object AugmentedDiff {
     spark: SparkSession,
     rows: Array[Row],
     uri: String, props: java.util.Properties
-  ): DataFrame = {
+  ): Array[Row] = {
     val osm = spark.table("osm").select(Common.osmColumns: _*)
     val rowLongs = rows.map({ row =>
       val id = row.getLong(1)
@@ -59,12 +59,13 @@ object AugmentedDiff {
         retval
     })
 
-    val rows2 = dfs.map({ df =>
-      df.select(Common.osmColumns: _*)
-        .filter({ row => desired.contains((row.getLong(1) /* id */, row.getString(2) /* type */)) })
-    }).reduce(_ union _)
-
-    osmesa.ProcessOSM.constructGeometries(rows2)
+    dfs
+      .map({ df =>
+        df.select(Common.osmColumns: _*)
+          .collect
+          .filter({ row => desired.contains((row.getLong(1) /* id */, row.getString(2) /* type */)) })
+      })
+      .reduce(_ ++ _).distinct
   }
 
 }
@@ -118,10 +119,7 @@ object AugmentedDiffApp extends CommandApp(
         case Some(jsonfile) =>
           val updates = spark.table("inbox").select(Common.osmColumns: _*).collect
           val time1 = System.currentTimeMillis
-          val rows = AugmentedDiff.augment(spark, updates, uri, props)
-          rows.printSchema
-          rows.collect.foreach({ row => println(row) })
-          // RowsToJson(jsonfile, AugmentedDiff.augment(spark, updates, uri, props))
+          RowsToJson(jsonfile, AugmentedDiff.augment(spark, updates, uri, props))
           val time2 = System.currentTimeMillis
           AugmentedDiff.logger.info(s"Augmented diff produced in ${time2 - time1} ms")
         case None =>

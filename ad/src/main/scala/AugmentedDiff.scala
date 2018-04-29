@@ -119,7 +119,7 @@ object AugmentedDiffApp extends CommandApp(
         case Some(jsonfile) =>
           val updates = spark.table("inbox").select(Common.osmColumns: _*).collect
           val time1 = System.currentTimeMillis
-          RowsToJson(jsonfile, AugmentedDiff.augment(spark, updates, uri, props))
+          RowsToJson(jsonfile, updates, AugmentedDiff.augment(spark, updates, uri, props))
           val time2 = System.currentTimeMillis
           AugmentedDiff.logger.info(s"Augmented diff produced in ${time2 - time1} ms")
         case None =>

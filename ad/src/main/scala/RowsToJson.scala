@@ -21,109 +21,45 @@ import java.io._
 object RowsToJson {
 
   sealed case class AlteredRow(row: Row, changeset: Long, until: Long, visible: Boolean)
+  sealed case class RowHistory(inWindow: Option[Row], beforeWindow: Option[Row])
 
-  def apply(filename: String, _rows: Array[Row]) = {
+  def apply(filename: String, updateRows: Array[Row], allRows: Array[Row]) = {
 
-    val alteredRows = _rows
-      .groupBy({ row => (row.getLong(1) /* id */, row.getString(2) /* type */) })
-      .map({ case ((id: Long, tipe: String), rows: Array[Row]) =>
-        val pair = rows.sortBy({ row => -row.getTimestamp(9).getTime }).take(2) match {
-          case Array(current, previous) =>
-            if (current.getBoolean(13) /* visible */ == true) { // visible
-              val current2 = AlteredRow(
-                row = current,
-                changeset = current.getLong(8),
-                until = -1,
-                visible = true)
-              val previous2 = AlteredRow(
-                row = previous,
-                changeset = previous.getLong(8),
-                until = current.getLong(8),
-                visible = previous.getBoolean(13))
-              Array(current2, previous2)
-            }
-            else { // invisible
-              val current2 = AlteredRow(
-                row = previous,
-                changeset = current.getLong(8),
-                until = -1,
-                visible = false)
-              val previous2 = AlteredRow(
-                row = previous,
-                changeset = previous.getLong(8),
-                until = current.getLong(8),
-                visible = previous.getBoolean(13))
-              Array(current2, previous2)
-            }
-          case Array(current) =>
-            Array(AlteredRow(
-              row = current,
-              changeset = current.getLong(8),
-              until = -1,
-              visible = current.getBoolean(13)))
+    // The window of time covered by the rows
+    val instants = updateRows.map({ row => row.getTimestamp(9).getTime })
+    val startTime = instants.reduce(_ min _)
+    val endTime = instants.reduce(_ max _)
 
-          case _ => Array.empty[AlteredRow]
-        }
-
-        (id, tipe) -> pair
+    // Relevant history of each node
+    val nodes: Array[(Long, RowHistory)] = _rows
+      .filter({ row => row.getString(2) == "node" })
+      .groupBy({ row => row.getLong(1) }).toArray
+      .map({ case (id: Long, rows: Array[Row]) =>
+        val rowHistory: RowHistory =
+          rows.sortBy({ row => -row.getTimestamp(9).getTime }).take(2) match {
+            case Array(newer, older) =>
+              val newerTime = newer.getTimestamp(9).getTime
+              val olderTime = older.getTimestamp(9).getTime
+              val newerIn = (startTime <= newerTime && newerTime <= endTime)
+              val olderIn = (startTime <= olderTime && olderTime <= endTime)
+              val bits = (newerIn, olderIn)
+              bits match {
+                case (true, true) => RowHistory(inWindow = Some(newer), beforeWindow = None)
+                case (true, false) => RowHistory(inWindow = Some(newer), beforeWindow = Some(older))
+                case (false, false) => RowHistory(inWindow = None, beforeWindow = Some(newer))
+                case (false, true) => throw new Exception("Oh no")
+              }
+            case Array(newer) =>
+              val newerTime = newer.getTimestamp(9).getTime
+              val newerIn = (startTime <= newerTime && newerTime <= endTime)
+              newerIn match {
+                case true => RowHistory(inWindow = Some(newer), beforeWindow = None)
+                case false => RowHistory(inWindow = None, beforeWindow = Some(newer))
+              }
+            case _ => throw new Exception("Oh no")
+          }
+        (id, rowHistory)
       })
-
-    // val points: Map[Long, Array[Double]] = osm
-    //   .filter({ row => row.getString(2) /* type */ == "node" })
-    //   .map({ row =>
-    //     val id = row.getLong(1) /* id */
-    //     try {
-    //       val array = Array[Double](
-    //         row.getDecimal(5).doubleValue, /* lon */
-    //         row.getDecimal(4).doubleValue  /* lat */
-    //       )
-    //       (id, array)
-    //     } catch {
-    //       case e: Exception => (id, Array[Double](-1.0, -1.0))
-    //     }
-    //   })
-    //   .toMap
-    // val notUnused = mutable.Set.empty[Long]
-    // val ways: Array[(Row, List[Long])] = osm
-    //   .filter({ row => row.getString(2) /* type */ == "way" })
-    //   .map({ row =>
-    //     val list: List[Row] = row.getSeq(6).toList
-    //     (row, list.map({ nd => nd.getLong(0) }))
-    //   })
-
-    // val lines =
-    //   ways.flatMap({ case (row, list) =>
-    //     try {
-    //       val id = row.getLong(1).toString
-    //       val tipe = row.getString(2)
-    //       val properties = Properties(
-    //         changeset = row.getLong(8).toString,
-    //         id = id,
-    //         tags = row.getMap(3).asInstanceOf[Map[String, String]],
-    //         timestamp = row.getTimestamp(9).toString,
-    //         tipe = tipe,
-    //         uid = row.getLong(10).toString,
-    //         user = row.getString(11),
-    //         version = row.getLong(12).toString,
-    //         visible = row.getBoolean(13)
-    //       )
-    //       val coordinates: Array[Array[Double]] = list.flatMap({ id => points.get(id) }).toArray
-    //       val json =
-    //         if (list.head == list.last && list.length > 3) {
-    //           val geometry = Polygon(coordinates = Array(coordinates))
-    //           val feature = PolygonFeature(id = id, geometry = geometry, properties = properties)
-    //           feature.asJson.noSpaces.toString.replaceAll("\"tipe\"", "\"type\"")
-    //         }
-    //         else {
-    //           val geometry = LineString(coordinates = coordinates)
-    //           val feature = LineStringFeature(id = id, geometry = geometry, properties = properties)
-    //           feature.asJson.noSpaces.toString.replaceAll("\"tipe\"", "\"type\"")
-    //         }
-    //       Some(json)
-    //     } catch {
-    //       case e: Exception => None
-    //     }
-    //   })
 
     // val fos = new FileOutputStream(new File(filename))
     // val p = new java.io.PrintWriter(fos)

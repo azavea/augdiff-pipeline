@@ -30,36 +30,59 @@ object RowsToJson {
     val startTime = instants.reduce(_ min _)
     val endTime = instants.reduce(_ max _)
 
+    def windowPredicate(row: Row): Boolean = {
+      val instant = row.getTimestamp(9).getTime
+      (startTime <= instant && instant <= endTime)
+    }
+
     // Relevant history of each node
-    val nodes: Array[(Long, RowHistory)] = _rows
+    val nodes: Map[Long, RowHistory] = allRows
       .filter({ row => row.getString(2) == "node" })
       .groupBy({ row => row.getLong(1) }).toArray
       .map({ case (id: Long, rows: Array[Row]) =>
-        val rowHistory: RowHistory =
-          rows.sortBy({ row => -row.getTimestamp(9).getTime }).take(2) match {
-            case Array(newer, older) =>
-              val newerTime = newer.getTimestamp(9).getTime
-              val olderTime = older.getTimestamp(9).getTime
-              val newerIn = (startTime <= newerTime && newerTime <= endTime)
-              val olderIn = (startTime <= olderTime && olderTime <= endTime)
-              val bits = (newerIn, olderIn)
-              bits match {
-                case (true, true) => RowHistory(inWindow = Some(newer), beforeWindow = None)
-                case (true, false) => RowHistory(inWindow = Some(newer), beforeWindow = Some(older))
-                case (false, false) => RowHistory(inWindow = None, beforeWindow = Some(newer))
-                case (false, true) => throw new Exception("Oh no")
-              }
-            case Array(newer) =>
-              val newerTime = newer.getTimestamp(9).getTime
-              val newerIn = (startTime <= newerTime && newerTime <= endTime)
-              newerIn match {
-                case true => RowHistory(inWindow = Some(newer), beforeWindow = None)
-                case false => RowHistory(inWindow = None, beforeWindow = Some(newer))
-              }
-            case _ => throw new Exception("Oh no")
+        val rowHistory = rows.sortBy({ row => -row.getTimestamp(9).getTime }).toStream
+        val inWindow: Option[Row] =
+          rowHistory.filter({ row => windowPredicate(row) }).take(1) match {
+            case Stream(row) => Some(row)
+            case Stream() => None
           }
-        (id, rowHistory)
-      })
+        val beforeWindow: Option[Row] =
+          rowHistory.filter({ row => !windowPredicate(row) }).take(1) match {
+            case Stream(row) => Some(row)
+            case Stream() => None
+          }
+
+        id -> RowHistory(inWindow = inWindow, beforeWindow = beforeWindow)
+      }).toMap
+
+    def wayWindowPredicate(row: Row): Boolean = {
+      val nds: List[Long] = row.getSeq(6).asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
+      val rowInWindow = windowPredicate(row)
+      lazy val depsInWindow =  nds
+        .map({ id => nodes.getOrElse(id, RowHistory(None, None)) })
+        .forall({ rh => rh.inWindow != None })
+      rowInWindow || depsInWindow
+    }
+
+    // Relevant history of each way
+    val ways: Map[Long, RowHistory] = allRows
+      .filter({ row => row.getString(2) == "way" })
+      .groupBy({ row => row.getLong(1) }).toArray
+      .map({ case (id: Long, rows: Array[Row]) =>
+        val rowHistory = rows.sortBy({ row => -row.getTimestamp(9).getTime }).toStream
+        val inWindow: Option[Row] =
+          rowHistory.filter({ row => wayWindowPredicate(row) }).take(1) match {
+            case Stream(row) => Some(row)
+            case Stream() => None
+          }
+        val beforeWindow: Option[Row] =
+          rowHistory.filter({ row => !wayWindowPredicate(row) }).take(1) match {
+            case Stream(row) => Some(row)
+            case Stream() => None
+          }
+
+        id -> RowHistory(inWindow = inWindow, beforeWindow = beforeWindow)
+      }).toMap
 
     // val fos = new FileOutputStream(new File(filename))
     // val p = new java.io.PrintWriter(fos)

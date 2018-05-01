@@ -36,14 +36,23 @@ object AugmentedDiff {
       val tipe = row.getString(2)
       Common.pairToLongFn(id, tipe)
     }).toSet
-    val triples = PostgresBackend.loadEdges(rowLongs, uri, props)
-      .map({ edge =>
-        val long = if (edge.direction == true) edge.a ; else edge.b
-        val id = Common.longToIdFn(long)
-        val tipe = Common.longToTypeFn(long)
+    val triples1 = // from updates
+      rows.map({ row =>
+        val id = row.getLong(1)
+        val tipe = row.getString(2)
         val p = Common.partitionNumberFn(id, tipe)
         (p, id, tipe)
-      })
+      }).toSet
+    val triples2 = // frp, dependencies
+      PostgresBackend.loadEdges(rowLongs, uri, props)
+        .map({ edge =>
+          val long = if (edge.direction == true) edge.a ; else edge.b
+          val id = Common.longToIdFn(long)
+          val tipe = Common.longToTypeFn(long)
+          val p = Common.partitionNumberFn(id, tipe)
+          (p, id, tipe)
+        }).toSet
+    val triples = triples1 ++ triples2
     val desired = triples.map({ triple => (triple._2, triple._3) })
     val keyedTriples = triples.groupBy(_._1)
 

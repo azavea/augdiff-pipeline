@@ -174,14 +174,67 @@ object RowsToJson {
 
     /*********** RENDERING ***********/
 
-    // val fos = new FileOutputStream(new File(filename))
-    // val p = new java.io.PrintWriter(fos)
-    // var i = 0; while (i < lines.length) {
-    //   p.write(lines(i)+"\n")
-    //   p.flush
-    //   i = i + 1
-    // }
-    // p.close
+    def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {
+      Map(
+        "id" -> row.getLong(1).toString,
+        "type" -> row.getString(2),
+        "tags" -> row.getMap(3).asInstanceOf[Map[String, String]].toJson.toString,
+        "changeset" -> row.getLong(8).toString,
+        "timestamp" -> row.getTimestamp(9).toString,
+        "uid" -> row.getLong(10).toString,
+        "user" -> row.getString(11),
+        "version" -> row.getLong(12).toString,
+        "visible" -> (visible match {
+          case None => row.getBoolean(13).toString
+          case Some(visible) => visible.toString
+        })
+      )
+    }
+
+    def getGeometry(row: Row): Geometry = {
+      row.getString(2) match {
+        case "node" =>
+          Point(row.getDecimal(5).doubleValue, row.getDecimal(4).doubleValue)
+      }
+    }
+
+    // Open JSON file
+    val fos = new FileOutputStream(new File(filename))
+    val p = new java.io.PrintWriter(fos)
+
+    // Render nodes
+    nodes.foreach({ case (id: Long, row: RowHistory) =>
+      row match {
+        case RowHistory(Some(inWindow), Some(beforeWindow)) => // delete, modify
+          val visibleNow = inWindow.getBoolean(13)
+          val p1 =
+            if (visibleNow) getGeometry(inWindow)
+            else getGeometry(beforeWindow)
+          val p2 = getGeometry(beforeWindow)
+          val m1 =
+            if (visibleNow) getMetadata(inWindow)
+            else getMetadata(beforeWindow, visible = Some(false))
+          val m2 =
+            if (visibleNow) getMetadata(beforeWindow, visible = Some(false))
+            else getMetadata(beforeWindow)
+
+          p.write(Feature(p1, m1).toJson.toString + "\n")
+          if (visibleNow) {
+            p.write(Feature(p2, m2).toJson.toString + "\n")
+          }
+        case RowHistory(Some(inWindow), None) => // create
+          if (inWindow.getBoolean(13)) {
+            val p1 = getGeometry(inWindow)
+            val m1 = getMetadata(inWindow)
+            p.write(Feature(p1, m1).toJson.toString + "\n")
+          }
+        case _ =>
+      }
+    })
+
+    // Close JSON file
+    p.flush
+    p.close
 
   }
 

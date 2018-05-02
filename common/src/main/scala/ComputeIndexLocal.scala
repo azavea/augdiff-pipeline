@@ -23,7 +23,6 @@ object ComputeIndexLocal {
       val tipe = r.getString(2)                     /* type */
       val instant: Long = r.getTimestamp(9).getTime /* timestamp */
       val b = Common.pairToLongFn(id, tipe)
-      if (b == 24875L) println(s"XXX 1 $r")
 
       tipe match {
         case "node" =>
@@ -36,7 +35,6 @@ object ComputeIndexLocal {
             val id = nd.getLong(0)
             val tipe = "node"
             val a = Common.pairToLongFn(id, tipe)
-            if (a == 24875L) println(s"XXX 2 $r")
             Array[Edge](
               Edge(a = a, b = b, instant = instant, direction = true),
               Edge(a = b, b = a, instant = instant, direction = false))
@@ -47,7 +45,6 @@ object ComputeIndexLocal {
             val tipe = member.getString(0) /* members.type */
             val id = member.getLong(1)     /* members.ref */
             val a = Common.pairToLongFn(id, tipe)
-            if (a == 24875L) println(s"XXX 3 $r $tipe $id $member")
             Array[Edge](
               Edge(a = a, b = b, instant = instant, direction = true),
               Edge(a = b, b = a, instant = instant, direction = false))

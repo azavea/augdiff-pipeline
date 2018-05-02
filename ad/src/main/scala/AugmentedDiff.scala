@@ -19,7 +19,7 @@ import com.monovore.decline._
 
 object AugmentedDiff {
 
-  private val logger = {
+  val logger = {
     val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
     logger
@@ -36,14 +36,23 @@ object AugmentedDiff {
       val tipe = row.getString(2)
       Common.pairToLongFn(id, tipe)
     }).toSet
-    val triples = PostgresBackend.loadEdges(rowLongs, uri, props)
-      .map({ edge =>
-        val long = if (edge.direction == true) edge.a ; else edge.b
-        val id = Common.longToIdFn(long)
-        val tipe = Common.longToTypeFn(long)
+    val triples1 = // from updates
+      rows.map({ row =>
+        val id = row.getLong(1)
+        val tipe = row.getString(2)
         val p = Common.partitionNumberFn(id, tipe)
         (p, id, tipe)
-      })
+      }).toSet
+    val triples2 = // frp, dependencies
+      PostgresBackend.loadEdges(rowLongs, uri, props)
+        .map({ edge =>
+          val long = if (edge.direction == true) edge.a ; else edge.b
+          val id = Common.longToIdFn(long)
+          val tipe = Common.longToTypeFn(long)
+          val p = Common.partitionNumberFn(id, tipe)
+          (p, id, tipe)
+        }).toSet
+    val triples = triples1 ++ triples2
     val desired = triples.map({ triple => (triple._2, triple._3) })
     val keyedTriples = triples.groupBy(_._1)
 
@@ -118,15 +127,10 @@ object AugmentedDiffApp extends CommandApp(
       jsonfile match {
         case Some(jsonfile) =>
           val updates = spark.table("inbox").select(Common.osmColumns: _*).collect
-          println(s"updates: ${updates.length}")
           val time1 = System.currentTimeMillis
-          println(s"size: ${AugmentedDiff.augment(spark, updates, uri, props).length}")
+          RowsToJson(jsonfile, updates, AugmentedDiff.augment(spark, updates, uri, props))
           val time2 = System.currentTimeMillis
-          val augmented = AugmentedDiff.augment(spark, updates, uri, props)
-          println(s"size: ${augmented.length}")
-          val time3 = System.currentTimeMillis
-          println(s"times: ${time2 - time1} ${time3 - time2}")
-          RowsToJson(jsonfile, augmented)
+          AugmentedDiff.logger.info(s"Augmented diff produced in ${time2 - time1} ms")
         case None =>
       }
     })

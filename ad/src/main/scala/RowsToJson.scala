@@ -211,6 +211,25 @@ object RowsToJson {
             })
             .map({ row => Point(row.getDecimal(5).doubleValue, row.getDecimal(4).doubleValue) })
           if (nds.head == nds.last) Polygon(points); else Line(points)
+        case "relation" =>
+          val members = row.getSeq(7).asInstanceOf[Seq[Row]].map({ member =>
+            val tipe = member.getString(0)
+            val id = member.getLong(1)
+            val row = tipe match {
+              case "node" => nodes.get(id).get
+              case "way" => ways.get(id).get
+              case "relation" => relations.get(id).get
+              case _ => throw new Exception("Oh no")
+            }
+            (inWindow, row) match {
+              case (true, RowHistory(Some(inWindow), _)) => inWindow
+              case (true, RowHistory(None, Some(beforeWindow))) => beforeWindow
+              case (false, RowHistory(_, Some(beforeWindow))) => beforeWindow
+              case _ => throw new Exception("Oh no")
+            }
+          })
+          val geoms = members.map({ row => getGeometry(row, inWindow = inWindow) })
+          GeometryCollection(geoms)
       }
     }
 
@@ -219,7 +238,7 @@ object RowsToJson {
     val p = new java.io.PrintWriter(fos)
 
     // Render to JSON
-    (nodes ++ ways).foreach({ case (id: Long, row: RowHistory) =>
+    (nodes ++ ways ++ relations).foreach({ case (id: Long, row: RowHistory) =>
       row match {
         case RowHistory(Some(inWindow), Some(beforeWindow)) => // delete, modify
           val visibleNow = inWindow.getBoolean(13)

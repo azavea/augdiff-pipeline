@@ -118,7 +118,7 @@ object ComputeIndex {
       leftEdges = leftEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       outputEdges = outputEdges.union(newEdges).select(Common.edgeColumnsPlus: _*)
       iteration = iteration + 1L
-      keepGoing = (iteration < 33) && (newEdges.count > 0)
+      keepGoing = (!newEdges.rdd.isEmpty)
     } while (keepGoing)
 
     outputEdges.select(Common.edgeColumns: _*)

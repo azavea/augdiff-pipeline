@@ -174,6 +174,7 @@ object RowsToJson {
 
     /*********** RENDERING ***********/
 
+    // Renderable metadata
     def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {
       Map(
         "id" -> row.getLong(1).toString,
@@ -191,10 +192,25 @@ object RowsToJson {
       )
     }
 
-    def getGeometry(row: Row): Geometry = {
+    // Renderable geometry
+    def getGeometry(row: Row, inWindow: Boolean = true): Geometry = {
       row.getString(2) match {
         case "node" =>
           Point(row.getDecimal(5).doubleValue, row.getDecimal(4).doubleValue)
+        case "way" =>
+          val nds = row.getSeq(6).asInstanceOf[Seq[Row]].map({ row => row.getLong(0) }).toArray
+          val points = nds
+            .map({ id =>
+              val row = nodes.get(id).get
+              (inWindow, row) match {
+                case (true, RowHistory(Some(inWindow), _)) => inWindow
+                case (true, RowHistory(None, Some(beforeWindow))) => beforeWindow
+                case (false, RowHistory(_, Some(beforeWindow))) => beforeWindow
+                case _ => throw new Exception("Oh no")
+              }
+            })
+            .map({ row => Point(row.getDecimal(5).doubleValue, row.getDecimal(4).doubleValue) })
+          if (nds.head == nds.last) Polygon(points); else Line(points)
       }
     }
 
@@ -202,15 +218,15 @@ object RowsToJson {
     val fos = new FileOutputStream(new File(filename))
     val p = new java.io.PrintWriter(fos)
 
-    // Render nodes
-    nodes.foreach({ case (id: Long, row: RowHistory) =>
+    // Render to JSON
+    (nodes ++ ways).foreach({ case (id: Long, row: RowHistory) =>
       row match {
         case RowHistory(Some(inWindow), Some(beforeWindow)) => // delete, modify
           val visibleNow = inWindow.getBoolean(13)
           val p1 =
-            if (visibleNow) getGeometry(inWindow)
-            else getGeometry(beforeWindow)
-          val p2 = getGeometry(beforeWindow)
+            if (visibleNow) getGeometry(inWindow, inWindow = true)
+            else getGeometry(beforeWindow, inWindow = false)
+          val p2 = getGeometry(beforeWindow, inWindow = false)
           val m1 =
             if (visibleNow) getMetadata(inWindow)
             else getMetadata(beforeWindow, visible = Some(false))
@@ -224,7 +240,7 @@ object RowsToJson {
           }
         case RowHistory(Some(inWindow), None) => // create
           if (inWindow.getBoolean(13)) {
-            val p1 = getGeometry(inWindow)
+            val p1 = getGeometry(inWindow, inWindow = true)
             val m1 = getMetadata(inWindow)
             p.write(Feature(p1, m1).toJson.toString + "\n")
           }

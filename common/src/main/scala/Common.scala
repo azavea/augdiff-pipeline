@@ -96,7 +96,6 @@ object Common {
     StructField("user", StringType, true),
     StructField("version", LongType, true),
     StructField("visible", BooleanType, true)))
-
   val osmColumns: List[Column] = List(
     col("p"),         /* 0 */
     col("id"),        /* 1 */
@@ -114,12 +113,17 @@ object Common {
     col("visible"))   /* 13 */
 
   val edgeColumns: List[Column] = List(
-    col("ap"), col("aid"), col("atype"), /* 0, 1, 2 */
-    col("instant"),                      /* 3 */
-    col("bp"), col("bid"), col("btype"), /* 4, 5, 6 */
-    col("a_to_b"))                       /* 7 */
+    col("a"), /* 0 */
+    col("b")  /* 1 */
+  )
 
-  val edgeColumnsPlus: List[Column] = edgeColumns :+ col("iteration") /* 8 */
+  val indexSchema = StructType(List(
+    StructField("v", LongType, false),
+    StructField("component", LongType, false)))
+  val indexColumns: List[Column] = List(
+    col("v"),        /* 0 */
+    col("component") /* 1 */
+  )
 
   private val logger = {
     val logger = Logger.getLogger(this.getClass)

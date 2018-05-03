@@ -36,11 +36,7 @@ object PostgresBackend {
   ): Unit = { // Only store edges from a to b
     logger.info(s"Writing index into ${uri}")
     index
-      .filter(col("a_to_b") === true)
-      .select(
-        Common.pairToLongUdf(col("aid"), col("atype")).as("a"),
-        Common.pairToLongUdf(col("bid"), col("btype")).as("b"),
-        col("instant"))
+      .select(Common.indexColumns: _*)
       .write
       .mode(mode)
       .jdbc(uri, tableName, props)

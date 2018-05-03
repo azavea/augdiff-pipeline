@@ -51,6 +51,6 @@ RUN ln /usr/share/java/postgresql-jdbc4.jar ${SPARK_HOME}/jars/postgresql-jdbc4.
 
 COPY hadoop/core-site.xml ${HADOOP_CONF_DIR}/core-site.xml
 COPY hadoop/hdfs-site.xml ${HADOOP_CONF_DIR}/hdfs-site.xml
-COPY hadoop/start-hdfs.sh /opt/start-hdfs.sh
+COPY hadoop/start-services.sh /opt/start-services.sh
 COPY hive/hive-site.xml ${HIVE_CONF_DIR}/hive-site.xml
 COPY hive/hive-site.xml ${SPARK_CONF_DIR}/hive-site.xml

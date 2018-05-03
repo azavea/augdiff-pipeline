@@ -18,13 +18,6 @@ services:
       - POSTGRES_PASSWORD=hive
     ports:
       - "5432:5432"
-  hive:
-    image: quay.io/azavea/hive:latest
-    build:
-      context: ./docker/hive
-      dockerfile: Dockerfile
-    links:
-      - metastore-database:database
   metastore-init:
     image: quay.io/azavea/hive:latest
     command: bash -c "/opt/start-hdfs.sh && schematool -dbType postgres -initSchema"
@@ -32,6 +25,15 @@ services:
       - metastore-database:database
   metastore-info:
     image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-hdfs.sh ; schematool -dbType postgres -info"
+    command: bash -c "/opt/start-services.sh ; schematool -dbType postgres -info"
     links:
       - metastore-database:database
+  hive:
+    image: quay.io/azavea/hive:latest
+    build:
+      context: ./docker/hive
+      dockerfile: Dockerfile
+    links:
+      - metastore-database:database
+    ports:
+      - "10000:10000"

@@ -1,7 +1,7 @@
 version: '3'
 services:
   osmium-tool:
-    image: jamesmcclain/osmium-tool
+    image: quay.io/azavea/osmium-tool:latest
     build:
       context: docker/osmium-tool
       dockerfile: Dockerfile

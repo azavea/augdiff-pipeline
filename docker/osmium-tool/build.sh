@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-docker build -t jamesmcclain/osmium-tool -f Dockerfile .
+docker build -t quay.io/azavea/osmium-tool:latest -f Dockerfile .

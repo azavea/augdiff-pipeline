@@ -20,7 +20,7 @@ services:
       - "5432:5432"
   metastore-init:
     image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-hdfs.sh && schematool -dbType postgres -initSchema"
+    command: bash -c '/opt/start-services.sh && schematool -dbType postgres -initSchema && echo "ALTER TABLE \"TBLS\" ALTER COLUMN \"IS_REWRITE_ENABLED\" DROP NOT NULL;" | PGPASSWORD=hive psql -h metastore-database -U hive -d metastore'
     links:
       - metastore-database:database
   metastore-info:

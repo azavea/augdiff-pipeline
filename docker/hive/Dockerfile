@@ -17,7 +17,7 @@ FROM openjdk:8
 
 # JDBC
 RUN apt-get update
-RUN apt-get install -y libpostgresql-jdbc-java
+RUN apt-get install -y libpostgresql-jdbc-java postgresql-client
 RUN apt-get clean
 
 # HADOOP

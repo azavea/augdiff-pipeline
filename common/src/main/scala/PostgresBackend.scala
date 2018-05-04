@@ -17,23 +17,11 @@ object PostgresBackend {
 
   private val groupLimit = 1024
 
-  def saveBulk(
-    bulk: DataFrame,
-    uri: String, props: java.util.Properties,
-    tableName: String, mode: String
-  ): Unit = {
-    logger.info(s"Writing OSM into ${uri}")
-    bulk
-      .write
-      .mode(mode)
-      .jdbc(uri, tableName, props)
-  }
-
   def saveIndex(
     index: DataFrame,
     uri: String, props: java.util.Properties,
     tableName: String, mode: String
-  ): Unit = { // Only store edges from a to b
+  ): Unit = {
     logger.info(s"Writing index into ${uri}")
     index
       .select(Common.indexColumns: _*)

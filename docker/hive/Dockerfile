@@ -49,8 +49,12 @@ ENV PATH="${SPARK_HOME}/bin:${PATH}"
 COPY --from=spark-build /tmp/spark-2.3.0-bin-hadoop2.7 ${SPARK_HOME}
 RUN ln /usr/share/java/postgresql-jdbc4.jar ${SPARK_HOME}/jars/postgresql-jdbc4.jar
 
+# Copy files
 COPY hadoop/core-site.xml ${HADOOP_CONF_DIR}/core-site.xml
 COPY hadoop/hdfs-site.xml ${HADOOP_CONF_DIR}/hdfs-site.xml
-COPY hadoop/start-services.sh /opt/start-services.sh
+COPY scripts/start-hdfs.sh /opt/start-hdfs.sh
+COPY scripts/start-hiveserver2.sh /opt/start-hiveserver2.sh
+COPY scripts/peek.sh /opt/peek.sh
+COPY scripts/poke.sh /opt/poke.sh
 COPY hive/hive-site.xml ${HIVE_CONF_DIR}/hive-site.xml
 COPY hive/hive-site.xml ${SPARK_CONF_DIR}/hive-site.xml

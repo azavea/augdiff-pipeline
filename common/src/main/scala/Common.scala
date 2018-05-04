@@ -12,7 +12,6 @@ object Common {
   def sparkSession(appName: String): SparkSession = {
     val conf = new SparkConf()
       .setAppName(appName)
-      .setIfMissing("spark.executor.heartbeatInterval", "30")
       .setIfMissing("spark.hadoop.hive.execution.engine", "spark")
       .setIfMissing("spark.master", "local[*]")
       .setIfMissing("spark.ui.enabled", "true")

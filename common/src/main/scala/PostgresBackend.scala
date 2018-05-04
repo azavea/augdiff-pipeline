@@ -31,10 +31,10 @@ object PostgresBackend {
   }
 
   def saveIndex(
-    index: Set[ComputeIndexLocal.Edge],
+    edges: Set[ComputeIndexLocal.Edge],
     uri: String, props: java.util.Properties,
     tableName: String
-  ): Unit = { // Only store edges from a to b
+  ): Unit = {
     logger.info(s"Writing index into ${uri}")
     val connection = java.sql.DriverManager.getConnection(uri, props)
     val statement = connection.createStatement
@@ -43,6 +43,7 @@ object PostgresBackend {
       val sql = s"insert into ${tableName} (a, b) values ($edge.a, $edge.b);"
       statement.executeUpdate(sql)
     })
+
     statement.close
     connection.close
   }

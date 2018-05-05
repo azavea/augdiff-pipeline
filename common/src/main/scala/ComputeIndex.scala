@@ -10,8 +10,30 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.storage.StorageLevel
 
+import scala.reflect.ClassTag
+
 
 object ComputeIndex {
+
+  /**
+    * Find the minimum-index VertexId reachable from each vertex.
+    */
+  private def minReachable[ED: ClassTag](graph: Graph[Any, ED]): Graph[VertexId, ED] = {
+
+    def vprog(id: VertexId, current: VertexId, message: VertexId): VertexId = math.min(current, message)
+
+    def sendMessage(edge: EdgeTriplet[VertexId, ED]): Iterator[(VertexId, VertexId)] = {
+      if (edge.dstAttr < edge.srcAttr) Iterator((edge.srcId, edge.dstAttr))
+      else Iterator.empty
+    }
+
+    def mergeMsg(left: VertexId, right: VertexId): VertexId = math.min(left, right)
+
+    Pregel(graph.mapVertices({ case (vid, _) => vid }), Long.MaxValue, Int.MaxValue, EdgeDirection.In)(
+      vprog = vprog,
+      sendMsg = sendMessage,
+      mergeMsg = mergeMsg)
+  }
 
   private val logger = {
     val logger = Logger.getLogger(this.getClass)
@@ -58,7 +80,7 @@ object ComputeIndex {
     val edges: RDD[Edge[Any]] = edgeDf.rdd.map({ row => Edge(row.getLong(0), row.getLong(1), null) })
     val defaultVertex = (-1L, null)
     val graph = Graph(vertices, edges, defaultVertex)
-    val components = graph.connectedComponents.vertices
+    val components = minReachable(graph).vertices
 
     rows.sparkSession.createDataFrame(
       components.map({ case (v, component) => Row(v, component) }),

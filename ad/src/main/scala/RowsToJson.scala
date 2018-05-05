@@ -55,18 +55,13 @@ object RowsToJson {
   def apply(filename: String, updateRows: Array[Row], allRows: Array[Row]) = {
 
     // The window of time covered by the rows
-    val instants = updateRows.map({ row => row.getTimestamp(9).getTime })
-    val startTime = instants.reduce(_ min _)
-    val endTime = instants.reduce(_ max _)
+    val windowSet = updateRows.toSet
 
     /*********** NODES ***********/
 
     def nodeCompletePredicate(row: Row): Boolean = true
 
-    def nodeWindowPredicate(row: Row): Boolean = { // XXX might need to be based on something other than time
-      val instant = row.getTimestamp(9).getTime
-      (startTime <= instant && instant <= endTime)
-    }
+    def nodeWindowPredicate(row: Row): Boolean = windowSet.contains(row)
 
     def nodeBeforePredicate(row: Row): Boolean = !nodeWindowPredicate(row)
 
@@ -86,7 +81,10 @@ object RowsToJson {
     def wayWindowPredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) true
       else {
-        val nds: List[Long] = row.getSeq(6).asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
+        val nds: List[Long] = row.get(6) match {
+          case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
+          case nds: Array[Row] => nds.asInstanceOf[Array[Row]].map(_.getLong(0)).toList
+        }
         nds
           .map({ id => nodes.getOrElse(id, RowHistory(None, None)) })
           .exists({ row => row.inWindow != None })
@@ -96,7 +94,10 @@ object RowsToJson {
     def wayBeforePredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) false
       else {
-        val nds: List[Long] = row.getSeq(6).asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
+        val nds: List[Long] = row.get(6) match {
+          case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
+          case nds: Array[Row] => nds.asInstanceOf[Array[Row]].map(_.getLong(0)).toList
+        }
         nds
           .map({ id => nodes.getOrElse(id, RowHistory(None, None)) })
           .forall({ row => row.beforeWindow != None })
@@ -137,7 +138,10 @@ object RowsToJson {
     def relWindowPredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) true
       else {
-        val members: List[Row] = row.getSeq(7).asInstanceOf[Seq[Row]].toList
+        val members: List[Row] = row.get(7) match {
+          case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toList
+          case members: Array[Row] => members.asInstanceOf[Array[Row]].toList
+        }
         val nodeMembers = members.filter(_.getString(0) == "node").map(_.getLong(1))
         val wayMembers = members.filter(_.getString(0) == "way").map(_.getLong(1))
         val relMembers = members
@@ -158,7 +162,10 @@ object RowsToJson {
     def relBeforePredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) false
       else {
-        val members: List[Row] = row.getSeq(7).asInstanceOf[Seq[Row]].toList
+        val members: List[Row] = row.get(7) match {
+          case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toList
+          case members: Array[Row] => members.asInstanceOf[Array[Row]].toList
+        }
         val nodeMembers = members.filter(_.getString(0) == "node").map(_.getLong(1))
         val wayMembers = members.filter(_.getString(0) == "way").map(_.getLong(1))
         val relMembers = members

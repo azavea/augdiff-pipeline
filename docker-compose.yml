@@ -1,7 +1,7 @@
 version: '3'
 services:
   osmium-tool:
-    image: jamesmcclain/osmium-tool
+    image: quay.io/azavea/osmium-tool:latest
     build:
       context: docker/osmium-tool
       dockerfile: Dockerfile
@@ -18,6 +18,16 @@ services:
       - POSTGRES_PASSWORD=hive
     ports:
       - "5432:5432"
+  metastore-init:
+    image: quay.io/azavea/hive:latest
+    command: bash -c '/opt/start-services.sh && schematool -dbType postgres -initSchema && echo "ALTER TABLE \"TBLS\" ALTER COLUMN \"IS_REWRITE_ENABLED\" DROP NOT NULL;" | PGPASSWORD=hive psql -h metastore-database -U hive -d metastore'
+    links:
+      - metastore-database:database
+  metastore-info:
+    image: quay.io/azavea/hive:latest
+    command: bash -c "/opt/start-services.sh ; schematool -dbType postgres -info"
+    links:
+      - metastore-database:database
   hive:
     image: quay.io/azavea/hive:latest
     build:
@@ -25,13 +35,5 @@ services:
       dockerfile: Dockerfile
     links:
       - metastore-database:database
-  metastore-init:
-    image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-hdfs.sh && schematool -dbType postgres -initSchema"
-    links:
-      - metastore-database:database
-  metastore-info:
-    image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-hdfs.sh ; schematool -dbType postgres -info"
-    links:
-      - metastore-database:database
+    ports:
+      - "10000:10000"

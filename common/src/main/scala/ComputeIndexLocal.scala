@@ -19,10 +19,9 @@ object ComputeIndexLocal {
 
   private def edgesFromRows(rows: Array[Row]): Array[Edge] = {
     rows.flatMap({ r =>
-      val id = r.getLong(1)                         /* id */
-      val tipe = r.getString(2)                     /* type */
-      val instant: Long = r.getTimestamp(9).getTime /* timestamp */
-      val b = Common.pairToLongFn(id, tipe)
+      val bId = r.getLong(1)      /* id */
+      val bType = r.getString(2)  /* type */
+      val b = Common.pairToLongFn(bId, bType)
 
       tipe match {
         case "node" =>

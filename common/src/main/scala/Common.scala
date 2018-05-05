@@ -118,11 +118,11 @@ object Common {
   )
 
   val indexSchema = StructType(List(
-    StructField("v", LongType, false),
-    StructField("component", LongType, false)))
+    StructField("a", LongType, false),
+    StructField("b", LongType, false)))
   val indexColumns: List[Column] = List(
-    col("v"),        /* 0 */
-    col("component") /* 1 */
+    col("a"), /* 0 */
+    col("b")  /* 1 */
   )
 
   private val logger = {

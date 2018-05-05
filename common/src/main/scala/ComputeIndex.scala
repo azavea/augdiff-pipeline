@@ -10,27 +10,31 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.storage.StorageLevel
 
-import scala.reflect.ClassTag
-
 
 object ComputeIndex {
 
   /**
-    * Find the minimum-index VertexId reachable from each vertex.
+    * Push dependency sets backwards through the graph.
     */
-  private def minReachable[ED: ClassTag](graph: Graph[Any, ED]): Graph[VertexId, ED] = {
+  private def pushBackwards(graph: Graph[Any, Any]): Graph[Set[VertexId], Any] = {
 
-    def vprog(id: VertexId, current: VertexId, message: VertexId): VertexId = math.min(current, message)
+    def vprog(id: VertexId, current: Set[VertexId], msg: Set[VertexId]): Set[VertexId] =
+      (current ++ msg + id)
 
-    def sendMessage(edge: EdgeTriplet[VertexId, ED]): Iterator[(VertexId, VertexId)] = {
-      if (edge.dstAttr < edge.srcAttr) Iterator((edge.srcId, edge.dstAttr))
+    def sendMessage(edge: EdgeTriplet[Set[VertexId], Any]): Iterator[(VertexId, Set[VertexId])] = {
+      if (!edge.dstAttr.subsetOf(edge.srcAttr)) Iterator((edge.srcId, edge.dstAttr))
       else Iterator.empty
     }
 
-    def mergeMsg(left: VertexId, right: VertexId): VertexId = math.min(left, right)
+    def mergeMsg(left: Set[VertexId], right: Set[VertexId]): Set[VertexId] = {
+      (left ++ right)
+    }
 
-    Pregel(graph.mapVertices({ case (vid, _) => vid }), Long.MaxValue, Int.MaxValue, EdgeDirection.In)(
-      vprog = vprog,
+    Pregel(graph.mapVertices({ case (id, _) => Set(id) }),
+      Set.empty[VertexId],
+      Int.MaxValue,
+      EdgeDirection.In
+    )(vprog = vprog,
       sendMsg = sendMessage,
       mergeMsg = mergeMsg)
   }
@@ -74,16 +78,22 @@ object ComputeIndex {
     logger.info(s"◻ Computing Index")
 
     val edgeDf = edgesFromRows(rows)
-    val as: RDD[(VertexId, Any)] = edgeDf.rdd.map({ row => (row.getLong(0), null) })
-    val bs: RDD[(VertexId, Any)] = edgeDf.rdd.map({ row => (row.getLong(1), null) })
-    val vertices: RDD[(VertexId, Any)] = as.union(bs).distinct
-    val edges: RDD[Edge[Any]] = edgeDf.rdd.map({ row => Edge(row.getLong(0), row.getLong(1), null) })
+    val vertices: RDD[(VertexId, Any)] = edgeDf.rdd.flatMap({
+      row => List[(VertexId, Any)]((row.getLong(0), null), (row.getLong(1), null))
+    }).distinct
+    val edges: RDD[Edge[Any]] = edgeDf.rdd.map({ row =>
+      Edge(row.getLong(0), row.getLong(1), null)
+    })
     val defaultVertex = (-1L, null)
     val graph = Graph(vertices, edges, defaultVertex)
-    val components = minReachable(graph).vertices
+    val data = pushBackwards(graph)
+      .vertices
+      .flatMap({ case (a, bs) =>
+        bs.map({ b => (a, b) }).filter({ case (a, b) => a != b })
+      })
 
     rows.sparkSession.createDataFrame(
-      components.map({ case (v, component) => Row(v, component) }),
+      data.map({ case (a, b) => Row(a, b) }),
       StructType(Common.indexSchema))
   }
 

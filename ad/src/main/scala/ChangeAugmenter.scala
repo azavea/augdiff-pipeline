@@ -52,8 +52,8 @@ object ChangeAugmenter {
     val uid: Long = entity.getUser.getId
     val user: String = entity.getUser.getName
     val version: Long = entity.getVersion
-    var lat: BigDecimal = null
-    var lon: BigDecimal = null
+    var lat: java.math.BigDecimal = null
+    var lon: java.math.BigDecimal = null
     var nds: Array[Row] = Array.empty[Row]
     var members: Array[Row] = Array.empty[Row]
     var tipe: String = null
@@ -62,8 +62,8 @@ object ChangeAugmenter {
       case EntityType.Node =>
         val node = entity.asInstanceOf[Node]
         tipe = "node"
-        lat = BigDecimal(node.getLatitude)
-        lon = BigDecimal(node.getLongitude)
+        lat = new java.math.BigDecimal(node.getLatitude)
+        lon = new java.math.BigDecimal(node.getLongitude)
       case EntityType.Way =>
         val way = entity.asInstanceOf[Way]
         tipe = "way"
@@ -95,11 +95,13 @@ object ChangeAugmenter {
 }
 
 class ChangeAugmenter(
-  spark: SparkSession, uri: String, props: java.util.Properties
+  spark: SparkSession,
+  uri: String, props: java.util.Properties,
+  jsonfile: String
 ) extends ChangeSink {
   import ChangeAugmenter._
 
-  val rs = mutable.ArrayBuffer.empty[Row]
+  val osm = mutable.ArrayBuffer.empty[Row]
 
   val logger = {
     val logger = Logger.getLogger(this.getClass)
@@ -111,10 +113,10 @@ class ChangeAugmenter(
     ct.getAction match {
       case ChangeAction.Create | ChangeAction.Modify =>
         val r = entityToRow(ct.getEntityContainer.getEntity, true)
-        rs.append(r)
+        osm.append(r)
       case ChangeAction.Delete =>
         val r = entityToLesserRow(ct.getEntityContainer.getEntity, false)
-        rs.append(r)
+        osm.append(r)
       case _ =>
     }
 
@@ -131,14 +133,16 @@ class ChangeAugmenter(
   def close(): Unit = {
     logger.info("close")
 
-    val osm = spark.createDataFrame(
-      spark.sparkContext.parallelize(rs.toList, 1),
-      StructType(Common.osmSchema))
-    val index = ComputeIndexLocal(rs.toArray, uri, props)
+    // val osmDf = spark.createDataFrame(
+    //   spark.sparkContext.parallelize(osm.toList, 1),
+    //   StructType(Common.osmSchema))
+    val diff = osm.toArray
+    val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
+    val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges)
+    RowsToJson(jsonfile, diff, augmentedDiff)
 
-    OrcBackend.saveBulk(osm, "inbox", "overwrite")
-    OrcBackend.saveBulk(osm, "osm", "append")
-    PostgresBackend.saveIndex(index, uri, props, "index")
+    // OrcBackend.saveBulk(osmDf, "osm", "append")
+    // PostgresBackend.saveIndex(index, uri, props, "index")
   }
 
 }

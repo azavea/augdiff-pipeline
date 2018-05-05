@@ -17,51 +17,33 @@ object PostgresBackend {
 
   private val groupLimit = 1024
 
-  def saveBulk(
-    bulk: DataFrame,
-    uri: String, props: java.util.Properties,
-    tableName: String, mode: String
-  ): Unit = {
-    logger.info(s"Writing OSM into ${uri}")
-    bulk
-      .write
-      .mode(mode)
-      .jdbc(uri, tableName, props)
-  }
-
   def saveIndex(
     index: DataFrame,
     uri: String, props: java.util.Properties,
     tableName: String, mode: String
-  ): Unit = { // Only store edges from a to b
+  ): Unit = {
     logger.info(s"Writing index into ${uri}")
     index
-      .filter(col("a_to_b") === true)
-      .select(
-        Common.pairToLongUdf(col("aid"), col("atype")).as("a"),
-        Common.pairToLongUdf(col("bid"), col("btype")).as("b"),
-        col("instant"))
+      .select(Common.indexColumns: _*)
       .write
       .mode(mode)
       .jdbc(uri, tableName, props)
   }
 
   def saveIndex(
-    index: Set[ComputeIndexLocal.Edge],
+    edges: Set[ComputeIndexLocal.Edge],
     uri: String, props: java.util.Properties,
     tableName: String
-  ): Unit = { // Only store edges from a to b
+  ): Unit = {
     logger.info(s"Writing index into ${uri}")
     val connection = java.sql.DriverManager.getConnection(uri, props)
     val statement = connection.createStatement
-    val edgeSet: Set[(Long, Long, Long)] = index.map({ edge =>
-      if (edge.direction == true) (edge.a, edge.b, edge.instant) // Edge from a to b
-      else (edge.b, edge.a, edge.instant)                        // Edge from b to a
-    })
-    edgeSet.foreach({ case (a, b, instant) =>
-      val sql = s"insert into ${tableName} (a, b, instant) values ($a, $b, $instant);"
+
+    edges.foreach({ edge =>
+      val sql = s"insert into ${tableName} (a, b) values ($edge.a, $edge.b);"
       statement.executeUpdate(sql)
     })
+
     statement.close
     connection.close
   }
@@ -75,20 +57,13 @@ object PostgresBackend {
     val retval = mutable.Set.empty[ComputeIndexLocal.Edge]
 
     desired.grouped(groupLimit).foreach({ desired =>
-      val forward = statement.executeQuery(s"select a, b, instant from index where b in ${desired.toString.drop(3)}")
+      val subquery = s"select distinct(b) from index where a in ${desired.toString.drop(3)}"
+      val query = s"select a, b from index where b in ($subquery)"
+      val forward = statement.executeQuery(query)
       while (forward.next) {
         val a = forward.getLong("a")
         val b = forward.getLong("b")
-        val instant = forward.getLong("instant")
-        retval += ComputeIndexLocal.Edge(a = a, b = b, instant = instant, direction = true)
-      }
-
-      val backward = statement.executeQuery(s"select a, b, instant from index where a in ${desired.toString.drop(3)}")
-      while (backward.next) {
-        val a = backward.getLong("a")
-        val b = backward.getLong("b")
-        val instant = backward.getLong("instant")
-        retval += ComputeIndexLocal.Edge(a = b, b = a, instant = instant, direction = false)
+        retval += ComputeIndexLocal.Edge(a = a, b = b)
       }
     })
 

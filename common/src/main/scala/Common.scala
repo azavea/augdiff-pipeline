@@ -12,7 +12,6 @@ object Common {
   def sparkSession(appName: String): SparkSession = {
     val conf = new SparkConf()
       .setAppName(appName)
-      .setIfMissing("spark.executor.heartbeatInterval", "30")
       .setIfMissing("spark.hadoop.hive.execution.engine", "spark")
       .setIfMissing("spark.master", "local[*]")
       .setIfMissing("spark.ui.enabled", "true")
@@ -96,7 +95,6 @@ object Common {
     StructField("user", StringType, true),
     StructField("version", LongType, true),
     StructField("visible", BooleanType, true)))
-
   val osmColumns: List[Column] = List(
     col("p"),         /* 0 */
     col("id"),        /* 1 */
@@ -114,12 +112,17 @@ object Common {
     col("visible"))   /* 13 */
 
   val edgeColumns: List[Column] = List(
-    col("ap"), col("aid"), col("atype"), /* 0, 1, 2 */
-    col("instant"),                      /* 3 */
-    col("bp"), col("bid"), col("btype"), /* 4, 5, 6 */
-    col("a_to_b"))                       /* 7 */
+    col("a"), /* 0 */
+    col("b")  /* 1 */
+  )
 
-  val edgeColumnsPlus: List[Column] = edgeColumns :+ col("iteration") /* 8 */
+  val indexSchema = StructType(List(
+    StructField("a", LongType, false),
+    StructField("b", LongType, false)))
+  val indexColumns: List[Column] = List(
+    col("a"), /* 0 */
+    col("b")  /* 1 */
+  )
 
   private val logger = {
     val logger = Logger.getLogger(this.getClass)

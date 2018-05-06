@@ -25,6 +25,13 @@ object AugmentedDiff {
     logger
   }
 
+  // Given a set of update rows (`rows1`) and a partial set of
+  // dependency arrows (`edges` [edge.a is an entity, edge.b is a
+  // dependency of that entity]), compute the complete set of rows
+  // needed to render the update.
+  //
+  // The set `edges` is passed-in because it has already been computed
+  // as part of the index-updating process.
   def augment(
     spark: SparkSession,
     rows1: Array[Row],
@@ -32,12 +39,15 @@ object AugmentedDiff {
   ): Array[Row] = {
     val osm = spark.table("osm").select(Common.osmColumns: _*)
 
+    // Convert (id, type) pairs to packed representations (both values
+    // stored in one long).
     val rowLongs = rows1.map({ row =>
       val id = row.getLong(1)
       val tipe = row.getString(2)
       Common.pairToLongFn(id, tipe)
     }).toSet
 
+    // (partition, id, type) triples from the update rows
     val triples1 = // from updates
       rows1.map({ row =>
         val id = row.getLong(1)
@@ -46,6 +56,7 @@ object AugmentedDiff {
         (p, id, tipe)
       }).toSet
 
+    // (partition, id, type) triples form the dependency rows
     val triples2 = // from dependencies
       edges
         .flatMap({ edge =>
@@ -58,12 +69,16 @@ object AugmentedDiff {
           List((ap, aId, aType), (bp, bId, bType))
         }).toSet
 
-    val triples = triples1 ++ triples2
-    val desired = triples.map({ triple => (triple._2, triple._3) })
-    val keyedTriples = triples.groupBy(_._1)
+    val triples = triples1 ++ triples2 // triples from all of the rows
+    val desired = triples.map({ triple => (triple._2, triple._3) }) // all desired (id, type) pairs
+    val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
 
     logger.info(s"● Reading ${keyedTriples.size} partitions in groups of ${Common.pfLimit}")
 
+    // The gymnastics involving keyedTriples are to allow all desired
+    // (id, type) pairs to be read out of storage using partition
+    // pruning (the first item of each triple is a partition number).
+    // The use of `isin` enable predicate pushdown.
     val dfs: Iterator[DataFrame] = keyedTriples.grouped(Common.pfLimit).map({ triples =>
       logger.info("● Reading group")
       val ps: Array[Long] = triples.map(_._1).toArray
@@ -75,6 +90,7 @@ object AugmentedDiff {
         retval
     })
 
+    // The set of dependency rows from storage
     val rows2 = dfs
       .map({ df =>
         df.select(Common.osmColumns: _*)

@@ -15,6 +15,8 @@ import spray.json.DefaultJsonProtocol._
 
 import scala.collection.mutable
 
+import com.vividsolutions.jts.{geom => jts}
+
 import java.io._
 
 
@@ -81,7 +83,9 @@ object RowsToJson {
 
     /*********** WAYS ***********/
 
-    // Is the way complete?  (Does the set of augmented diff rows contain everything needed to render the row [all of the nodes]?)
+    // Is the way complete?  (Does the set of augmented diff rows
+    // contain everything needed to render the row [all of the
+    // nodes]?)
     def wayCompletePredicate(row: Row): Boolean = {
       val nds: List[Long] = row.get(6) match {
         case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
@@ -135,7 +139,8 @@ object RowsToJson {
         id -> rows.sortBy({ row => -row.getTimestamp(9).getTime }).head
       }).toMap
 
-    // Does the augmented diff row-set contain everything needed to render this relation?
+    // Does the augmented diff row-set contain everything needed to
+    // render this relation?
     def relCompletePredicate(row: Row): Boolean = {
       val members: List[Row] = row.get(7) match {
         case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toList
@@ -204,6 +209,120 @@ object RowsToJson {
 
     /*********** RENDERING ***********/
 
+    // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
+    def getMultiLine(geoms: Seq[Geometry]): MultiLine = {
+      val lines: Seq[MultiLine] = geoms.map({ geom =>
+        geom match {
+          case geom: Line => MultiLine(geom)
+          case geom: MultiLine => geom
+          case _ => throw new Exception("Oh no")
+        } })
+
+      def onion(left: MultiLine, right: MultiLine): MultiLine = {
+        // (left.union(right)) match {
+        //   case MultiLineResult(ml) => ml
+        //   case _ => throw new Exception("Oh No")
+        // }
+        MultiLine(left.lines ++ right.lines)
+      }
+
+      lines
+        .reduce((l, r) => onion(l,r))
+    }
+
+    def linesToPolygons(lines: Array[Line]): Array[MultiPolygon] = {
+      val graph = mutable.ArrayBuffer.empty[(Int, Int)]
+
+      var i = 0; while (i < lines.length) {
+        val line1 = lines(i).points
+        var j = i+1; while (j < lines.length) {
+          val line2 = lines(j).points
+          if (line1.head == line2.head || line1.head == line2.tail) {
+            val pair = (i, j)
+            graph += pair
+          }
+          j=j+1
+        }
+        i=i+1
+      }
+
+      // lines.foreach({ line1 =>
+      //   lines.foreach({ line2 =>
+      //     if (line1 != line2) {
+      //       if (line1.points.last == line2.points.head) {
+      //         val p =
+      //           if (line2.last == line1.head) Polygon(line1.points ++ line2.points.drop(1))
+      //           else Polygon(line1.points ++ line2.points.drop(1) ++ line1.points.take(1))
+      //         mps += MultiPolygon(p)
+      //       }
+      //       else if (line1.head == line2.head) {
+      //         val line2points = line2.points.reverse
+      //         val p =
+      //           if (line2.last == line1.head) Polygon(line1.points ++ line2points.drop(1))
+      //           else Polygon(line1.points ++ line2points.drop(1) ++ line1.points.take(1))
+      //         mps += MultiPolygon(p)
+      //       }
+      //     }
+      //   })
+      // })
+
+      mps.toArray
+    }
+
+    // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
+    def getMultiPolygon(geoms: Seq[Geometry]): MultiPolygon = {
+      val polys1 = geoms.flatMap({ geom =>
+        geom match {
+          case geom: Polygon => Some(MultiPolygon(geom))
+          case geom: MultiPolygon => Some(geom)
+          case _ => None
+        } })
+        .toArray
+      val lines = geoms
+        .filter({ geom => geom.isInstanceOf[Line] })
+        .map({ geom => geom.asInstanceOf[Line] })
+        .toArray
+      val polys2 = linesToPolygons(lines)
+      // val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
+      val polys = polys2
+
+      // // If a polygon is contained within another one, subtract the
+      // // smaller from the larger and delete the smaller.
+      // var i: Int = 0; while (i < polys.length) {
+      //   var j: Int = i+1; while (j < polys.length) {
+      //     if (polys(i).within(polys(j))) {
+      //       polys(j).difference(polys(i)) match {
+      //         case MultiPolygonResult(mp) =>
+      //           polys(j) = mp
+      //           polys(i) = null
+      //           j = polys.length
+      //         case _ =>
+      //       }
+      //     }
+      //     j=j+1
+      //   }
+      //   i=i+1
+      // }
+
+      def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon = {
+        // if (left.intersects(right)) {
+        //   left.jtsGeom.union(right.jtsGeom) match {
+        //     case p: jts.Polygon =>
+        //       println(s"$left $right $p")
+        //       MultiPolygon(p)
+        //     case mp: jts.MultiPolygon => MultiPolygon(mp)
+        //     case r: Any => throw new Exception(s"Oh no: $left $right $r")
+        //   }
+        // }
+        // else
+        MultiPolygon(left.polygons ++ right.polygons)
+      }
+
+      polys
+        .filter(_ != null)
+        .reduce((l, r) => onion(l,r))
+    }
+
     // Renderable metadata
     def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {
       Map(
@@ -266,7 +385,19 @@ object RowsToJson {
             }
           })
           val geoms = members.map({ row => getGeometry(row, inWindow = inWindow) })
-          GeometryCollection(geoms)
+          val map = row.getMap(3).asInstanceOf[Map[String, String]]
+
+          val mp1 = map.contains("boundary")
+          val mp2 = map.get("type") match {
+            case Some("multipolygon") | Some("boundary")=> true
+            case _ => false
+          }
+          val mp3 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[Polygon] || geom.isInstanceOf[MultiPolygon] })
+          val ml1 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[MultiLine] })
+
+          if ((mp1 || mp2) && mp3) getMultiPolygon(geoms)
+          else if (ml1) getMultiLine(geoms)
+          else GeometryCollection(geoms)
       }
     }
 

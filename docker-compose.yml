@@ -27,11 +27,11 @@ services:
       - metastore-database:database
   metastore-init:
     image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-hdfs.sh && schematool -dbType postgres -initSchema"
+    command: bash -c "schematool -dbType postgres -initSchema"
     links:
       - metastore-database:database
   metastore-info:
     image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-hdfs.sh ; schematool -dbType postgres -info"
+    command: bash -c "schematool -dbType postgres -info"
     links:
       - metastore-database:database

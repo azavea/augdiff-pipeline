@@ -58,9 +58,8 @@ class ExtractionStream extends Transform {
     const feature = obj.features.find(f => f.id === "new");
     // set visibility based on the operation
     feature.properties.visible = obj.id !== "delete";
-    feature.id = feature.properties.id;
 
-    this.push(feature);
+    this.push(obj);
 
     return callback();
   }

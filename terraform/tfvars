@@ -1,0 +1,11 @@
+aws_account_id = "896538046175"
+
+aws_key_name = "geotrellis-emr"
+
+public_subnets = ["subnet-7658965a", "subnet-3d9e5967" ]
+
+vpc_id = "vpc-35c73e4c"
+
+spot_fleet_bid_percentage = "50"
+
+external_access_cidr_block = "66.212.12.106/32"

@@ -15,13 +15,23 @@ object OrcBackend {
     logger
   }
 
-  def saveBulk(bulk: DataFrame, tableName: String, mode: String): Unit = {
+  def saveBulk(
+    bulk: DataFrame,
+    tableName: String,
+    externalLocation: Option[String],
+    mode: String
+  ): Unit = {
+    val options = externalLocation match {
+      case Some(location) => Map("path"-> location)
+      case None => Map.empty[String, String]
+    }
     logger.info(s"Writing OSM as ORC files")
     bulk
       .orderBy("p", "id", "type")
       .write
       .mode(mode)
       .format("orc")
+      .options(options)
       .partitionBy("p")
       .saveAsTable(tableName)
   }

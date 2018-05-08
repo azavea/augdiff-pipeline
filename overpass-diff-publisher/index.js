@@ -71,7 +71,7 @@ const writer = targetURI =>
 
     const uri = url.parse(targetURI);
     const body = batch
-      .map(x => `\u001e${JSON.stringify(x)}\n`)
+      .map(x => `${JSON.stringify(x)}\n`)
       .join("");
 
     switch (uri.protocol) {

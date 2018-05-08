@@ -20,16 +20,17 @@ services:
       - "5432:5432"
   metastore-init:
     image: quay.io/azavea/hive:latest
-    command: bash -c '/opt/start-services.sh && schematool -dbType postgres -initSchema && echo "ALTER TABLE \"TBLS\" ALTER COLUMN \"IS_REWRITE_ENABLED\" DROP NOT NULL;" | PGPASSWORD=hive psql -h metastore-database -U hive -d metastore'
+    command: bash -c "/opt/poke.sh"
     links:
       - metastore-database:database
   metastore-info:
     image: quay.io/azavea/hive:latest
-    command: bash -c "/opt/start-services.sh ; schematool -dbType postgres -info"
+    command: bash -c "/opt/peek.sh"
     links:
       - metastore-database:database
   hive:
     image: quay.io/azavea/hive:latest
+    command: /opt/start-hiveserver2.sh
     build:
       context: ./docker/hive
       dockerfile: Dockerfile

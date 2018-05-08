@@ -22,6 +22,15 @@ object RowsToJson {
 
   sealed case class RowHistory(inWindow: Option[Row], beforeWindow: Option[Row])
 
+  // Turn the set of augmented diff rows into a collection of
+  // histories suitable for rendering geometries after and before the
+  // update (the latter rendered as invisible so that they can be
+  // deleted).
+  //
+  // The intent here is: for each entity present in the augmented diff
+  // set, get the most recent occurrence that is within the update
+  // window (should be only one) and the most recent before the update
+  // window, and package them together.
   private def getRowHistories(
     rows: Array[Row],
     tipe: String,
@@ -54,15 +63,17 @@ object RowsToJson {
 
   def apply(filename: String, updateRows: Array[Row], allRows: Array[Row]) = {
 
-    // The window of time covered by the rows
     val windowSet = updateRows.toSet
 
     /*********** NODES ***********/
 
+    // Is the node complete? (Nodes always are.)
     def nodeCompletePredicate(row: Row): Boolean = true
 
+    // Is the node in the update window?
     def nodeWindowPredicate(row: Row): Boolean = windowSet.contains(row)
 
+    // Is the node before the update window?  (Not mutually exclusive with the above.)
     def nodeBeforePredicate(row: Row): Boolean = !nodeWindowPredicate(row)
 
     val nodes = getRowHistories(allRows, "node", nodeCompletePredicate, nodeWindowPredicate, nodeBeforePredicate)
@@ -70,6 +81,7 @@ object RowsToJson {
 
     /*********** WAYS ***********/
 
+    // Is the way complete?  (Does the set of augmented diff rows contain everything needed to render the row [all of the nodes]?)
     def wayCompletePredicate(row: Row): Boolean = {
       val nds: List[Long] = row.get(6) match {
         case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
@@ -78,6 +90,7 @@ object RowsToJson {
       nds.forall({ id => nodeIds.contains(id) })
     }
 
+    // Is the way in the update window?
     def wayWindowPredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) true
       else {
@@ -91,6 +104,7 @@ object RowsToJson {
       }
     }
 
+    // Is the way renderable before the update window?
     def wayBeforePredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) false
       else {
@@ -121,6 +135,7 @@ object RowsToJson {
         id -> rows.sortBy({ row => -row.getTimestamp(9).getTime }).head
       }).toMap
 
+    // Does the augmented diff row-set contain everything needed to render this relation?
     def relCompletePredicate(row: Row): Boolean = {
       val members: List[Row] = row.get(7) match {
         case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toList
@@ -135,6 +150,7 @@ object RowsToJson {
       nodesOkay && waysOkay && relsOkay
     }
 
+    // Is the relation part of the update window?
     def relWindowPredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) true
       else {
@@ -159,6 +175,7 @@ object RowsToJson {
       }
     }
 
+    // Can the relation be rendered before the update window?
     def relBeforePredicate(row: Row): Boolean = {
       if (nodeWindowPredicate(row)) false
       else {

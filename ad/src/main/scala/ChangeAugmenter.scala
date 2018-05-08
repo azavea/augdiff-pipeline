@@ -16,6 +16,10 @@ import java.sql.Timestamp
 
 
 object ChangeAugmenter {
+
+  // Lesser rows have all of the same columns, but the information for
+  // many of those columns is not provided (used for recording
+  // deletions).
   def entityToLesserRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
     val tags = Map.empty[String,String]
@@ -41,6 +45,7 @@ object ChangeAugmenter {
     row
   }
 
+  // These rows come from creations and modifications.
   def entityToRow(entity: Entity, visible: Boolean): Row = {
     val id: Long = entity.getId
     val tags: Map[String,String] = entity.getTags.toArray.map({ tag =>
@@ -133,9 +138,6 @@ class ChangeAugmenter(
   def close(): Unit = {
     logger.info("close")
 
-    // val osmDf = spark.createDataFrame(
-    //   spark.sparkContext.parallelize(osm.toList, 1),
-    //   StructType(Common.osmSchema))
     val diff = osm.toArray
     val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
     val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges)

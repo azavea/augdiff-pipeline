@@ -2,15 +2,13 @@ package osmdiff.updater.schemas
 
 import geotrellis.vector.Feature
 import geotrellis.vectortile._
-import org.apache.log4j.Logger
 import org.joda.time.DateTime
 import osmdiff.updater.Implicits._
 import osmdiff.updater._
 
-class History(override val layer: Layer, override val features: Map[String, AugmentedDiffFeature]) extends Schema {
-  private lazy val logger = Logger.getLogger(getClass)
-
-  private lazy val touchedFeatures: Map[String, Seq[VTFeature]] = {
+class History(override val layer: Layer,
+              override val features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) extends Schema {
+  override protected lazy val touchedFeatures: Map[String, Seq[VTFeature]] = {
     val featureIds = features.keySet
 
     layer
@@ -22,49 +20,33 @@ class History(override val layer: Layer, override val features: Map[String, Augm
         .sortWith(_.data("__version") < _.data("__version")))
   }
 
-  private lazy val minorVersions: Map[String, Int] = {
-    features.values
-      .groupBy(f => f.data.elementId)
-      .mapValues(f => f.head.data)
-      .mapValues(f => (f.elementId, f.version, f.timestamp))
-      .mapValues { case (id, version, _) =>
-        versionInfo.get(id) match {
-          case Some((prevVersion, _, _)) if prevVersion < version => 0
-          case Some((prevVersion, prevMinorVersion, _)) if prevVersion == version => prevMinorVersion + 1
-          case _ => 0
-        }
+  lazy val newFeatures: Seq[VTFeature] =
+    features
+      .filter {
+        case (id, (_, curr)) =>
+          versionInfo.get(id) match {
+            case Some((_, _, prevTimestamp)) if curr.data.timestamp.isAfter(prevTimestamp) => true
+            case None => true
+            case _ => false
+          }
       }
-  }
-
-  private lazy val versionInfo: Map[String, (Int, Int, DateTime)] =
-    touchedFeatures
-      .mapValues(_.last)
-      .mapValues(f => (
-        f.data("__version").toInt,
-        f.data("__minorVersion").toInt,
-        new DateTime(f.data("__updated"): Long)
-      ))
-
-  lazy val newFeatures: Seq[VTFeature] = {
-    features.values
-      .filter(f =>
-        versionInfo.get(f.data.elementId) match {
-          case Some((_, _, prevTimestamp)) if f.data.timestamp.isAfter(prevTimestamp) => true
-          case None => true
-          case _ => false
-        }
-      )
-      .map(x => makeFeature(x, minorVersions.get(x.data.elementId)))
+      .filter {
+        // filter out null geometries
+        case (_, (_, curr)) => Option(curr.geom).isDefined && curr.isValid
+      }
+      .map {
+        case (id, (_, curr)) => (id, makeFeature(curr, minorVersions.get(id)))
+      }
+      .values
       .filter(_.isDefined)
       .map(_.get)
       .toSeq
-  }
 
   override lazy val replacementFeatures: Seq[VTFeature] = {
     val activeFeatures = touchedFeatures
       .filter {
         case (id, fs) =>
-          features(id).data.timestamp.isAfter(fs.last.data("__updated"))
+          features(id)._2.data.timestamp.isAfter(fs.last.data("__updated"))
       }
 
     val featuresToReplace = activeFeatures
@@ -74,7 +56,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
       .toSeq
 
     val replacedFeatures = featuresToReplace
-      .map(f => updateFeature(f, features(f.data("__id")).data.timestamp))
+      .map(f => updateFeature(f, features(f.data("__id"))._2.data.timestamp))
 
     logger.info(s"Rewriting ${replacedFeatures.length.formatted("%,d")} features")
 
@@ -85,7 +67,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
     val activeFeatures = touchedFeatures
       .filter {
         case (id, fs) =>
-          features(id).data.timestamp.isAfter(fs.last.data("__updated"))
+          features(id)._2.data.timestamp.isAfter(fs.last.data("__updated"))
       }
 
     activeFeatures
@@ -95,7 +77,9 @@ class History(override val layer: Layer, override val features: Map[String, Augm
       .toSeq
   }
 
-  private def makeFeature(feature: AugmentedDiffFeature, minorVersion: Option[Int], validUntil: Option[Long] = None): Option[VTFeature] = {
+  private def makeFeature(feature: AugmentedDiffFeature,
+                          minorVersion: Option[Int],
+                          validUntil: Option[Long] = None): Option[VTFeature] = {
     val id = feature.data.id
 
     val elementId = feature.data.elementType match {
@@ -120,7 +104,7 @@ class History(override val layer: Layer, override val features: Map[String, Augm
               "__version" -> VInt64(feature.data.version),
               "__uid" -> VInt64(feature.data.uid),
               "__user" -> VString(feature.data.user),
-              "__visible" -> VBool(feature.data.visible)
+              "__visible" -> VBool(feature.data.visible.getOrElse(true))
             ) ++ minorVersion.map(v => Map("__minorVersion" -> VInt64(v))).getOrElse(Map.empty[String, Value])
           )
         )
@@ -137,6 +121,6 @@ class History(override val layer: Layer, override val features: Map[String, Augm
 }
 
 object History extends SchemaBuilder {
-  def apply(layer: Layer, features: Map[String, AugmentedDiffFeature]) =
+  def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) =
     new History(layer, features)
 }

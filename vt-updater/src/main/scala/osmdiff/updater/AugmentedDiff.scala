@@ -12,7 +12,7 @@ case class AugmentedDiff(
                           uid: Long,
                           user: String,
                           version: Int,
-                          visible: Boolean,
+                          visible: Option[Boolean],
                           tags: Map[String, String]
                         ) {
   val elementId: String = elementType match {
@@ -24,6 +24,7 @@ case class AugmentedDiff(
 }
 
 object AugmentedDiff {
+
   implicit object AugmentedDiffFormat extends RootJsonReader[AugmentedDiff] {
     def read(value: JsValue): AugmentedDiff =
       value match {
@@ -77,9 +78,9 @@ object AugmentedDiff {
           }
 
           val visible = fields.get("visible") match {
-            case Some(JsBoolean(v)) => v
+            case Some(JsBoolean(v)) => Some(v)
             case Some(v) => throw DeserializationException(s"'visible' must be a boolean, got $v")
-            case None => throw DeserializationException(s"'visible' is required")
+            case None => None
           }
 
           val tags = fields.get("tags") match {
@@ -95,4 +96,5 @@ object AugmentedDiff {
         case _ => throw DeserializationException(s"'properties' is required")
       }
   }
+
 }

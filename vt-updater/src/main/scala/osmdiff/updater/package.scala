@@ -10,6 +10,7 @@ import geotrellis.proj4.{LatLng, WebMercator}
 import geotrellis.spark.SpatialKey
 import geotrellis.spark.tiling.{LayoutDefinition, ZoomedLayoutScheme}
 import geotrellis.vector.io._
+import geotrellis.vector.io.json.JsonFeatureCollectionMap
 import geotrellis.vector.{Extent, Feature, Geometry, Line, MultiLine, MultiPoint, MultiPolygon, Point, Polygon}
 import geotrellis.vectortile._
 import org.apache.commons.io.IOUtils
@@ -67,7 +68,7 @@ package object updater {
     }
   }
 
-  def readFeatures(uri: URI): Option[Seq[AugmentedDiffFeature]] = {
+  def readFeatures(uri: URI): Option[Seq[(Option[AugmentedDiffFeature], AugmentedDiffFeature)]] = {
     val lines: Option[Seq[String]] = uri.getScheme match {
       case "s3" =>
         Try(IOUtils.toString(s3.getObject(uri.getHost, uri.getPath.drop(1)).getObjectContent)) match {
@@ -95,18 +96,25 @@ package object updater {
 
     lines match {
       case Some(ls) =>
-        Some(ls
+        val features = ls
           .map(_
             .drop(1) // remove the record separator at the beginning of a JSON record
-            .parseGeoJson[AugmentedDiffFeature]))
+            .parseGeoJson[JsonFeatureCollectionMap]
+            .getAll[AugmentedDiffFeature])
+
+        Some(features.map(_.get("old")).zip(features.map(_ ("new"))))
       case None => None
     }
   }
 
   def write(uri: URI, bytes: Array[Byte]): Any = {
+    // TODO optionally compress (and, if compressed, include appropriate headers when writing to S3)
     uri.getScheme match {
       case "s3" =>
-        Try(s3.putObject(uri.getHost, uri.getPath.drop(1), new ByteArrayInputStream(bytes), createMetadata(bytes.length))) match {
+        Try(s3.putObject(uri.getHost,
+            uri.getPath.drop(1),
+            new ByteArrayInputStream(bytes),
+            createMetadata(bytes.length))) match {
           case Success(_) =>
           case Failure(e) => e match {
             case ex: AmazonS3Exception =>
@@ -120,31 +128,52 @@ package object updater {
     }
   }
 
-  def tile(features: Seq[AugmentedDiffFeature], layout: LayoutDefinition): Map[SpatialKey, Seq[AugmentedDiffFeature]] = {
+  def tile(features: Seq[(Option[AugmentedDiffFeature], AugmentedDiffFeature)],
+           layout: LayoutDefinition): Map[SpatialKey, Seq[(Option[AugmentedDiffFeature], AugmentedDiffFeature)]] =
     features
-      .map(_.mapGeom(_.reproject(LatLng, WebMercator)))
-      .filter(_.isValid)
-      .flatMap { feat =>
-        layout
-          .mapTransform
-          .keysForGeometry(feat.geom)
-          .map { sk =>
-            (sk, feat.mapGeom(_.intersection(sk.extent(layout)).toGeometry.orNull))
-          }
-          .filter(x => Option(x._2.geom).isDefined && x._2.isValid)
+      .map {
+        case (prev, curr) => (
+          prev.map(_.mapGeom(_.reproject(LatLng, WebMercator))),
+          curr.mapGeom(_.reproject(LatLng, WebMercator)))
+      }
+      .filter {
+        case (_, curr) => curr.isValid
+      }
+      .flatMap {
+        case (prev, curr) =>
+          val prevKeys = prev.map(f => layout.mapTransform.keysForGeometry(f.geom)).getOrElse(Set.empty[SpatialKey])
+          val currKeys = layout.mapTransform.keysForGeometry(curr.geom)
+
+          (prevKeys ++ currKeys)
+            .map { sk =>
+              (sk, (
+                prev.map(_.mapGeom(_.intersection(sk.extent(layout)).toGeometry.orNull)),
+                curr.mapGeom(_.intersection(sk.extent(layout)).toGeometry.orNull)))
+            }
       }
       .groupBy(_._1)
       .mapValues(_.map(_._2))
-  }
 
   def path(zoom: Int, sk: SpatialKey) = s"$zoom/${sk.col}/${sk.row}.mvt"
 
-  def updateTiles(tileSource: URI, layerName: String, zoom: Int, schemaType: SchemaBuilder, features: Seq[AugmentedDiffFeature], listing: Option[Path], process: (SpatialKey, VectorTile) => Any): Unit = {
+  def updateTiles(tileSource: URI,
+                  layerName: String,
+                  zoom: Int,
+                  schemaType: SchemaBuilder,
+                  features: Seq[(Option[AugmentedDiffFeature], AugmentedDiffFeature)],
+                  listing: Option[Path],
+                  process: (SpatialKey, VectorTile) => Any): Unit = {
     val layout = LayoutScheme.levelForZoom(zoom).layout
+
+    // NOTE: data will exist for both generations of features in a given SpatialKey; geometries may be null if a
+    // generation's geometry did not intersect that key
     val tiledFeatures = tile(features, layout)
 
+    // NOTE: when writing features to a tile that was not previously intersected, minorVersion (and authors) will be
+    // wrong
+
     val tiles = listing match {
-      case Some (l) =>
+      case Some(l) =>
         Source.fromFile(l.toFile).getLines.toSet
       case None => Set.empty[String]
     }
@@ -164,8 +193,8 @@ package object updater {
               val extent = sk.extent(layout)
               val tile = VectorTile.fromBytes(bytes, extent)
 
-              val featuresById = feats
-                .groupBy(_.data.elementId)
+              val featuresById: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)] = feats
+                .groupBy(_._2.data.elementId)
                 .mapValues(fs => fs.head)
               val featureIds = featuresById.keySet
 
@@ -205,7 +234,12 @@ package object updater {
       }
   }
 
-  def segregate(features: Seq[VTFeature]): (Seq[TypedVTFeature[Point]], Seq[TypedVTFeature[MultiPoint]], Seq[TypedVTFeature[Line]], Seq[TypedVTFeature[MultiLine]], Seq[TypedVTFeature[Polygon]], Seq[TypedVTFeature[MultiPolygon]]) = {
+  def segregate(features: Seq[VTFeature]): (Seq[TypedVTFeature[Point]],
+                                            Seq[TypedVTFeature[MultiPoint]],
+                                            Seq[TypedVTFeature[Line]],
+                                            Seq[TypedVTFeature[MultiLine]],
+                                            Seq[TypedVTFeature[Polygon]],
+                                            Seq[TypedVTFeature[MultiPolygon]]) = {
     val points = ListBuffer[TypedVTFeature[Point]]()
     val multiPoints = ListBuffer[TypedVTFeature[MultiPoint]]()
     val lines = ListBuffer[TypedVTFeature[Line]]()

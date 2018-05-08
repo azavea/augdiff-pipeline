@@ -4,15 +4,17 @@ import geotrellis.vector.Feature
 import geotrellis.vectortile.{Layer, VInt64, VString}
 import osmdiff.updater._
 
-class Snapshot(override val layer: Layer, override val features: Map[String, AugmentedDiffFeature]) extends Schema {
-  lazy val newFeatures: Seq[VTFeature] = {
+class Snapshot(override val layer: Layer,
+               override val features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]
+              ) extends Schema {
+  lazy val newFeatures: Seq[VTFeature] =
     features.values
-      .filter(_.data.visible)
+      .map(_._2)
+      .filter(_.data.visible.getOrElse(true))
       .map(makeFeature)
       .filter(_.isDefined)
       .map(_.get)
       .toSeq
-  }
 
   private def makeFeature(feature: AugmentedDiffFeature): Option[VTFeature] = {
     val id = feature.data.id
@@ -47,6 +49,6 @@ class Snapshot(override val layer: Layer, override val features: Map[String, Aug
 }
 
 object Snapshot extends SchemaBuilder {
-  def apply(layer: Layer, features: Map[String, AugmentedDiffFeature]) =
+  def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) =
     new Snapshot(layer, features)
 }

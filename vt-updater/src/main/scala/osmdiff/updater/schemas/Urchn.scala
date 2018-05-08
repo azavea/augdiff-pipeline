@@ -2,15 +2,12 @@ package osmdiff.updater.schemas
 
 import geotrellis.vector.Feature
 import geotrellis.vectortile._
-import org.apache.log4j.Logger
-import org.joda.time.DateTime
 import osmdiff.updater.Implicits._
 import osmdiff.updater._
 
-class Urchn(override val layer: Layer, override val features: Map[String, AugmentedDiffFeature]) extends Schema {
-  private lazy val logger = Logger.getLogger(getClass)
-
-  private lazy val touchedFeatures: Map[String, Seq[VTFeature]] = {
+class Urchn(override val layer: Layer,
+            override val features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) extends Schema {
+  override protected lazy val touchedFeatures: Map[String, Seq[VTFeature]] = {
     val featureIds = features.keySet
 
     layer
@@ -22,63 +19,50 @@ class Urchn(override val layer: Layer, override val features: Map[String, Augmen
         .sortWith(_.data("__version") < _.data("__version")))
   }
 
-  private lazy val minorVersions: Map[String, Int] =
-    features.values
-      .groupBy(f => f.data.elementId)
-      .mapValues(f => f.head.data)
-      .mapValues(f => (f.elementId, f.version, f.timestamp))
-      .mapValues { case (id, version, _) =>
-        versionInfo.get(id) match {
-          case Some((prevVersion, _, _)) if prevVersion < version => 0
-          case Some((prevVersion, prevMinorVersion, _)) if prevVersion == version => prevMinorVersion + 1
-          case _ => 0
-        }
-      }
-
-  private lazy val authors: Map[String, Set[String]] = {
+  private lazy val authors: Map[String, Set[String]] =
     touchedFeatures
       .mapValues(_.last)
       .mapValues(_.data("__authors").split(",").toSet)
-  }
 
   private lazy val creation: Map[String, Long] =
     touchedFeatures
       .mapValues(_.head)
       .mapValues(_.data("__creation"))
 
-  private lazy val versionInfo: Map[String, (Int, Int, DateTime)] =
-    touchedFeatures
-      .mapValues(_.last)
-      .mapValues(f => (
-        f.data("__version").toInt,
-        f.data("__minorVersion").toInt,
-        new DateTime(f.data("__updated"): Long)
-      ))
-
   lazy val newFeatures: Seq[VTFeature] =
-    features.values
-      .filter(f =>
-        versionInfo.get(f.data.elementId) match {
-          case Some((_, _, prevTimestamp)) if f.data.timestamp.isAfter(prevTimestamp) => true
-          case None => true
-          case _ => false
-        }
-      )
-      .map(x =>
+    features
+      .filter {
+        case (id, (_, curr)) =>
+          versionInfo.get(id) match {
+            case Some((_, _, prevTimestamp)) if curr.data.timestamp.isAfter(prevTimestamp) => true
+            case None => true
+            case _ => false
+          }
+      }
+      .values
+      .filter {
+        // filter out null geometries
+        case (_, curr) => Option(curr.geom).isDefined && curr.isValid
+      }
+      .map { case (_, curr) =>
+        // NOTE: if this feature appears in the current tile for the first time, creation, authors, and minorVersions
+        // will be incomplete (and therefore wrong)
         makeFeature(
-          x,
+          curr,
           creation
-            .getOrElse(x.data.elementId, x.data.timestamp.getMillis),
+            .getOrElse(curr.data.elementId, curr.data.timestamp.getMillis),
           authors
-            .get(x.data.elementId)
-            .map(_ + x.data.user)
-            .getOrElse(Set(x.data.user)),
-          minorVersions.get(x.data.elementId)))
+            .get(curr.data.elementId)
+            .map(_ + curr.data.user)
+            .getOrElse(Set(curr.data.user)),
+          minorVersions.get(curr.data.elementId))
+      }
       .filter(_.isDefined)
       .map(_.get)
       .toSeq
 
-  private def makeFeature(feature: AugmentedDiffFeature, creation: Long, authors: Set[String], minorVersion: Option[Int]): Option[VTFeature] = {
+  private def makeFeature(feature: AugmentedDiffFeature, creation: Long, authors: Set[String],
+                          minorVersion: Option[Int]): Option[VTFeature] = {
     val id = feature.data.id
 
     val elementId = feature.data.elementType match {
@@ -89,7 +73,7 @@ class Urchn(override val layer: Layer, override val features: Map[String, Augmen
     }
 
     feature match {
-      case _ if feature.geom.isValid =>
+      case _ if Option(feature.geom).isDefined && feature.geom.isValid =>
         Some(
           Feature(
             feature.geom, // when features are deleted, this will be the last geometry that was visible
@@ -114,6 +98,6 @@ class Urchn(override val layer: Layer, override val features: Map[String, Augmen
 }
 
 object Urchn extends SchemaBuilder {
-  def apply(layer: Layer, features: Map[String, AugmentedDiffFeature]) =
+  def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) =
     new Urchn(layer, features)
 }

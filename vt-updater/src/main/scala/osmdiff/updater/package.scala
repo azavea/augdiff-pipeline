@@ -98,7 +98,7 @@ package object updater {
       case Some(ls) =>
         val features = ls
           .map(_
-            .drop(1) // remove the record separator at the beginning of a JSON record
+            .replace("\u001e", "") // remove record separators if present
             .parseGeoJson[JsonFeatureCollectionMap]
             .getAll[AugmentedDiffFeature])
 

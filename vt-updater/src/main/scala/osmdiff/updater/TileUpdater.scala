@@ -29,12 +29,6 @@ object TileUpdater extends CommandApp(
       metavar = "uri",
       help = "URI prefix for vector tiles to update"
     ).withDefault(rootURI)
-    val layerNameOpt = Opts.option[String](
-      "layer-name",
-      short = "l",
-      metavar = "layer name",
-      help = "Layer to modify"
-    )
     val minZoomOpt = Opts.option[Int](
       "min-zoom",
       short = "z",
@@ -80,9 +74,9 @@ object TileUpdater extends CommandApp(
 
     val logger = Logger.getLogger(classOf[TileUpdater])
 
-    (replicationSourceOpt, tileSourceOpt, layerNameOpt, minZoomOpt, maxZoomOpt, schemaOpt, listingOpt, dryRunOpt,
+    (replicationSourceOpt, tileSourceOpt, minZoomOpt, maxZoomOpt, schemaOpt, listingOpt, dryRunOpt,
       verboseOpt, sequenceOpt).mapN {
-      (replicationSource, tileSource, layerName, minZoom, maxZoom, schema, listing, dryRun, verbose, sequence) =>
+      (replicationSource, tileSource, minZoom, maxZoom, schema, listing, dryRun, verbose, sequence) =>
         val replicationUri = replicationSource.resolve(s"$sequence.json")
 
         if (verbose) {
@@ -94,7 +88,6 @@ object TileUpdater extends CommandApp(
             for (zoom <- minZoom to maxZoom) {
               updateTiles(
                 tileSource = tileSource,
-                layerName = layerName,
                 zoom = zoom,
                 schemaType = schema,
                 features = features,

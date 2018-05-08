@@ -98,6 +98,8 @@ class Urchn(override val layer: Layer,
 }
 
 object Urchn extends SchemaBuilder {
+  override val layerName: String = "history"
+
   def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) =
     new Urchn(layer, features)
 }

@@ -42,5 +42,7 @@ trait Schema {
 }
 
 trait SchemaBuilder {
+  val layerName: String
+
   def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]): Schema
 }

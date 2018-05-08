@@ -49,6 +49,8 @@ class Snapshot(override val layer: Layer,
 }
 
 object Snapshot extends SchemaBuilder {
+  override val layerName: String = "data"
+
   def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) =
     new Snapshot(layer, features)
 }

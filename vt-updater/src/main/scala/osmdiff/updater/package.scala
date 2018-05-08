@@ -157,7 +157,6 @@ package object updater {
   def path(zoom: Int, sk: SpatialKey) = s"$zoom/${sk.col}/${sk.row}.mvt"
 
   def updateTiles(tileSource: URI,
-                  layerName: String,
                   zoom: Int,
                   schemaType: SchemaBuilder,
                   features: Seq[(Option[AugmentedDiffFeature], AugmentedDiffFeature)],
@@ -199,9 +198,9 @@ package object updater {
               val featureIds = featuresById.keySet
 
               // load the target layer
-              val layer = tile.layers(layerName)
+              val layer = tile.layers(schemaType.layerName)
 
-              logger.debug(s"Inspecting ${layer.features.size.formatted("%,d")} features in layer '$layerName'")
+              logger.debug(s"Inspecting ${layer.features.size.formatted("%,d")} features in layer '${schemaType.layerName}'")
 
               // fetch unmodified features
               val unmodifiedFeatures = layer
@@ -220,10 +219,10 @@ package object updater {
 
               unmodifiedFeatures ++ retainedFeatures ++ replacementFeatures ++ newFeatures match {
                 case updatedFeatures if (replacementFeatures.length + newFeatures.length) > 0 =>
-                  val updatedLayer = makeLayer(layerName, extent, updatedFeatures)
+                  val updatedLayer = makeLayer(schemaType.layerName, extent, updatedFeatures)
 
                   // merge all available layers into a new tile
-                  val newTile = VectorTile(tile.layers.updated(layerName, updatedLayer), extent)
+                  val newTile = VectorTile(tile.layers.updated(schemaType.layerName, updatedLayer), extent)
 
                   process(sk, newTile)
                 case _ =>

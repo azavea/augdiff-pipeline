@@ -121,6 +121,8 @@ class History(override val layer: Layer,
 }
 
 object History extends SchemaBuilder {
+  override val layerName: String = "all"
+
   def apply(layer: Layer, features: Map[String, (Option[AugmentedDiffFeature], AugmentedDiffFeature)]) =
     new History(layer, features)
 }

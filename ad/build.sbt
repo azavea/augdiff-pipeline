@@ -13,7 +13,7 @@ libraryDependencies ++= Seq(
   "org.locationtech.geotrellis" %% "geotrellis-vector" % "1.2.1",
   "org.openstreetmap.osmosis" % "osmosis-core"  % "0.46",
   "org.openstreetmap.osmosis" % "osmosis-xml"   % "0.46",
-  "postgresql"                % "postgresql"    % "9.1-901-1.jdbc4"
+  "org.postgresql"            % "postgresql"    % "9.4.1212"
 )
 
 assemblyJarName in assembly := "ad.jar"

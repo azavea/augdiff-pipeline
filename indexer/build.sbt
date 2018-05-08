@@ -8,7 +8,7 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-graphx" % "2.3.0" % "provided",
   "org.apache.spark" %% "spark-hive"   % "2.3.0" % "provided",
   "org.apache.spark" %% "spark-sql"    % "2.3.0" % "provided",
-  "postgresql"        % "postgresql"   % "9.1-901-1.jdbc4"
+  "org.postgresql"    % "postgresql"   % "9.4.1212"
 )
 
 assemblyJarName in assembly := "indexer.jar"

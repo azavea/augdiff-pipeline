@@ -36,9 +36,11 @@ object Indexer extends CommandApp(
       Opts.option[String]("postgresPassword", help = "PostgreSQL password").withDefault("hive")
     val postgresDb =
       Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
+    val external =
+      Opts.option[String]("external", help = "External location of OSM table").orNone
 
-    (orcfile, partitions, persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
-      (orcfile, partitions, _persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+    (orcfile, partitions, persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
+      (orcfile, partitions, _persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
 
       val persistence = _persistence match {
         case Some("memory_only") | Some("MEMORY_ONLY") => Some(StorageLevel.MEMORY_ONLY)
@@ -65,10 +67,7 @@ object Indexer extends CommandApp(
       val index = ComputeIndex(osm, persistence, partitions)
 
       PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
-      partitions match {
-        case Some(p) => OrcBackend.saveBulk(osm.repartition(p), "osm", "overwrite")
-        case None => OrcBackend.saveBulk(osm, "osm", "overwrite")
-      }
+      OrcBackend.saveBulk(osm, "osm", external, partitions, "overwrite")
 
     })
   }

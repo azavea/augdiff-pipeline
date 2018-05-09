@@ -78,7 +78,7 @@ object AugmentedDiff {
     // The gymnastics involving keyedTriples are to allow all desired
     // (id, type) pairs to be read out of storage using partition
     // pruning (the first item of each triple is a partition number).
-    // The use of `isin` enable predicate pushdown.
+    // Then, use of `isin` enable predicate pushdown.
     val dfs: Iterator[DataFrame] = keyedTriples.grouped(Common.pfLimit).map({ triples =>
       logger.info("● Reading group")
       val ps: Array[Long] = triples.map(_._1).toArray
@@ -91,7 +91,7 @@ object AugmentedDiff {
     })
 
     // The set of dependency rows from storage
-    val rows2 = dfs
+    val _rows2 = dfs
       .map({ df =>
         df.select(Common.osmColumns: _*)
           .collect
@@ -101,7 +101,9 @@ object AugmentedDiff {
             val pair = (id, tipe)
             desired.contains(pair) })
       })
-      .reduce(_ ++ _)
+    val rows2 =
+      if (_rows2.isEmpty) Array.empty[Row]
+      else _rows2.reduce(_ ++ _)
 
     (rows1 ++ rows2).distinct // rows from update ++ rows from storage
   }

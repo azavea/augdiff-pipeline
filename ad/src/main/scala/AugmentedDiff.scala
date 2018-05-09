@@ -91,7 +91,7 @@ object AugmentedDiff {
     })
 
     // The set of dependency rows from storage
-    val rows2 = dfs
+    val _rows2 = dfs
       .map({ df =>
         df.select(Common.osmColumns: _*)
           .collect
@@ -101,7 +101,9 @@ object AugmentedDiff {
             val pair = (id, tipe)
             desired.contains(pair) })
       })
-      .reduce(_ ++ _)
+    val rows2 =
+      if (_rows2.isEmpty) Array.empty[Row]
+      else _rows2.reduce(_ ++ _)
 
     (rows1 ++ rows2).distinct // rows from update ++ rows from storage
   }

@@ -67,10 +67,7 @@ object Indexer extends CommandApp(
       val index = ComputeIndex(osm, persistence, partitions)
 
       PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
-      partitions match {
-        case Some(p) => OrcBackend.saveBulk(osm.repartition(p), "osm", external, "overwrite")
-        case None => OrcBackend.saveBulk(osm, "osm", external, "overwrite")
-      }
+      OrcBackend.saveBulk(osm, "osm", external, partitions, "overwrite")
 
     })
   }

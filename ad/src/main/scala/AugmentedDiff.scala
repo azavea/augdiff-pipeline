@@ -146,7 +146,10 @@ object AugmentedDiffApp extends CommandApp(
         ps
       }
 
-      val cr = new XmlChangeReader(new File(oscfile), true, CompressionMethod.None)
+      val cr =
+        if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(new File(oscfile), true, CompressionMethod.BZip2)
+        else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(new File(oscfile), true, CompressionMethod.GZip)
+        else new XmlChangeReader(new File(oscfile), true, CompressionMethod.None)
       val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
       cr.setChangeSink(ca)
       cr.run

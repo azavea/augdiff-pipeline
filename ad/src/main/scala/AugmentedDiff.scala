@@ -6,12 +6,17 @@ import org.apache.spark.rdd._
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
+import org.apache.commons.io.FileUtils
+
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import org.openstreetmap.osmosis.xml.common.CompressionMethod
 import org.openstreetmap.osmosis.xml.v0_6.XmlChangeReader
 
 import scala.collection.mutable
 
-import java.io.File
+import java.io._
+import java.net.{URI, URL}
 
 import cats.implicits._
 import com.monovore.decline._
@@ -146,10 +151,29 @@ object AugmentedDiffApp extends CommandApp(
         ps
       }
 
+      val file: File =
+        if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
+          val path = new Path(oscfile)
+          val conf = spark.sparkContext.hadoopConfiguration
+          val uri = new URI(oscfile)
+          val fs = FileSystem.get(uri, conf)
+          val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+          tmp.deleteOnExit // XXX
+          fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
+          tmp
+        }
+        else if (oscfile.startsWith("http:")) {
+          val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+          val url = new URL(oscfile)
+          tmp.deleteOnExit // XXX
+          FileUtils.copyURLToFile(url, tmp)
+          tmp
+        }
+        else new File(oscfile)
       val cr =
-        if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(new File(oscfile), true, CompressionMethod.BZip2)
-        else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(new File(oscfile), true, CompressionMethod.GZip)
-        else new XmlChangeReader(new File(oscfile), true, CompressionMethod.None)
+        if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
+        else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
+        else new XmlChangeReader(file, true, CompressionMethod.None)
       val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
       cr.setChangeSink(ca)
       cr.run

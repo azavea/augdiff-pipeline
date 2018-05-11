@@ -15,6 +15,7 @@ import org.openstreetmap.osmosis.core.task.common.ChangeAction
 import scala.collection.mutable
 
 import java.io._
+import java.net.URI
 import java.sql.Timestamp
 
 
@@ -148,7 +149,7 @@ class ChangeAugmenter(
       if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
         val path = new Path(jsonfile)
         val conf = spark.sparkContext.hadoopConfiguration
-        val fs = FileSystem.get(new java.net.URI(jsonfile), conf)
+        val fs = FileSystem.get(new URI(jsonfile), conf)
         fs.create(path)
       }
       else new FileOutputStream(new File(jsonfile))

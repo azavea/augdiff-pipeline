@@ -5,6 +5,8 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import org.openstreetmap.osmosis.core.container.v0_6._
 import org.openstreetmap.osmosis.core.domain.v0_6._
 import org.openstreetmap.osmosis.core.task.v0_6.ChangeSink
@@ -12,6 +14,8 @@ import org.openstreetmap.osmosis.core.task.common.ChangeAction
 
 import scala.collection.mutable
 
+import java.io._
+import java.net.URI
 import java.sql.Timestamp
 
 
@@ -141,7 +145,16 @@ class ChangeAugmenter(
     val diff = osm.toArray
     val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
     val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges)
-    RowsToJson(jsonfile, diff, augmentedDiff)
+    val fos =
+      if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
+        val path = new Path(jsonfile)
+        val conf = spark.sparkContext.hadoopConfiguration
+        val fs = FileSystem.get(new URI(jsonfile), conf)
+        fs.create(path)
+      }
+      else new FileOutputStream(new File(jsonfile))
+
+    RowsToJson(fos, diff, augmentedDiff)
 
     // OrcBackend.saveBulk(osmDf, "osm", "append")
     // PostgresBackend.saveIndex(index, uri, props, "index")

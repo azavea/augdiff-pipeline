@@ -61,7 +61,7 @@ object RowsToJson {
       }).toMap
   }
 
-  def apply(filename: String, updateRows: Array[Row], allRows: Array[Row]) = {
+  def apply(fos: OutputStream, updateRows: Array[Row], allRows: Array[Row]) = {
 
     val windowSet = updateRows.toSet
 
@@ -271,7 +271,6 @@ object RowsToJson {
     }
 
     // Open JSON file
-    val fos = new FileOutputStream(new File(filename))
     val p = new java.io.PrintWriter(fos)
 
     // Render to JSON

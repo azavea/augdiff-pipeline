@@ -6,12 +6,17 @@ import org.apache.spark.rdd._
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
+import org.apache.commons.io.FileUtils
+
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import org.openstreetmap.osmosis.xml.common.CompressionMethod
 import org.openstreetmap.osmosis.xml.v0_6.XmlChangeReader
 
 import scala.collection.mutable
 
-import java.io.File
+import java.io._
+import java.net.{URI, URL}
 
 import cats.implicits._
 import com.monovore.decline._
@@ -78,7 +83,7 @@ object AugmentedDiff {
     // The gymnastics involving keyedTriples are to allow all desired
     // (id, type) pairs to be read out of storage using partition
     // pruning (the first item of each triple is a partition number).
-    // Then, use of `isin` enable predicate pushdown.
+    // The use of `isin` enables predicate pushdown.
     val dfs: Iterator[DataFrame] = keyedTriples.grouped(Common.pfLimit).map({ triples =>
       logger.info("● Reading group")
       val ps: Array[Long] = triples.map(_._1).toArray
@@ -146,7 +151,29 @@ object AugmentedDiffApp extends CommandApp(
         ps
       }
 
-      val cr = new XmlChangeReader(new File(oscfile), true, CompressionMethod.None)
+      val file: File =
+        if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
+          val path = new Path(oscfile)
+          val conf = spark.sparkContext.hadoopConfiguration
+          val uri = new URI(oscfile)
+          val fs = FileSystem.get(uri, conf)
+          val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+          tmp.deleteOnExit // XXX
+          fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
+          tmp
+        }
+        else if (oscfile.startsWith("http:")) {
+          val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+          val url = new URL(oscfile)
+          tmp.deleteOnExit // XXX
+          FileUtils.copyURLToFile(url, tmp)
+          tmp
+        }
+        else new File(oscfile)
+      val cr =
+        if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
+        else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
+        else new XmlChangeReader(file, true, CompressionMethod.None)
       val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
       cr.setChangeSink(ca)
       cr.run

@@ -157,6 +157,9 @@ object AugmentedDiff {
     }
   }
 
+  def numberToStr(n: Int): String =
+    (n.toString.reverse ++ "000").take(3).reverse
+
 }
 
 object AugmentedDiffApp extends CommandApp(
@@ -168,10 +171,12 @@ object AugmentedDiffApp extends CommandApp(
 
     Common.denoise
 
-    val oscfile =
-      Opts.option[String]("oscfile", help = "OSC file containing OSM data")
-    val jsonfile =
-      Opts.option[String]("jsonfile", help = "JSON file containing augmented diff")
+    val osctemplate =
+      Opts.option[String]("osctemplate", help = "OSC input template")
+    val jsontemplate =
+      Opts.option[String]("jsontemplate", help = "JSON output template")
+    val range =
+      Opts.option[String]("range", help = "The range of OSC files to consume")
     val postgresHost =
       Opts.option[String]("postgresHost", help = "PostgreSQL host").withDefault("localhost")
     val postgresPort =
@@ -183,8 +188,8 @@ object AugmentedDiffApp extends CommandApp(
     val postgresDb =
       Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
 
-    (oscfile, jsonfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
-      (oscfile, jsonfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+    (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
+      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -195,7 +200,20 @@ object AugmentedDiffApp extends CommandApp(
         ps
       }
 
-      AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, spark)
+      val stream = range.split(",") match {
+        case Array(start, "-1") => Stream.from(start.toInt)
+        case Array(start, end) => Stream.from(start.toInt).take(end.toInt - start.toInt + 1)
+        case _ => throw new Exception("Oh no")
+      }
+
+      stream.foreach({ i =>
+        val ccc = AugmentedDiff.numberToStr(i % 1000)
+        val bbb = AugmentedDiff.numberToStr((i / 1000) % 1000)
+        val aaa = AugmentedDiff.numberToStr((i / 1000000) % 1000)
+        val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
+        val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
+        AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, spark)
+      })
     })
   }
 )

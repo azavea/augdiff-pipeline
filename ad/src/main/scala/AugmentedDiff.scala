@@ -113,40 +113,48 @@ object AugmentedDiff {
     (rows1 ++ rows2).distinct // rows from update ++ rows from storage
   }
 
-  def getFile(oscfile: String, spark: SparkSession): File = {
-    if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
-      val path = new Path(oscfile)
-      val conf = spark.sparkContext.hadoopConfiguration
-      val uri = new URI(oscfile)
-      val fs = FileSystem.get(uri, conf)
-      val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
-      tmp.deleteOnExit // XXX
-      fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
-      tmp
-    }
-    else if (oscfile.startsWith("http:")) {
-      val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
-      val url = new URL(oscfile)
-      tmp.deleteOnExit // XXX
-      FileUtils.copyURLToFile(url, tmp)
-      tmp
-    }
-    else new File(oscfile)
-  }
-
   def osc2json(
     oscfile: String, jsonfile: String,
     uri: String, props: java.util.Properties,
     spark: SparkSession
   ): Unit = {
-    val file = getFile(oscfile, spark)
-    val cr =
-      if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
-      else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
-      else new XmlChangeReader(file, true, CompressionMethod.None)
-    val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
-    cr.setChangeSink(ca)
-    cr.run
+    var i: Int = 1; while (i <= (1<<8)) {
+      try {
+        val file =
+          if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
+            val path = new Path(oscfile)
+            val conf = spark.sparkContext.hadoopConfiguration
+            val uri = new URI(oscfile)
+            val fs = FileSystem.get(uri, conf)
+            val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+            tmp.deleteOnExit // XXX not sufficient for long-running process
+            fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
+            tmp
+          }
+          else if (oscfile.startsWith("http:")) {
+            val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+            val url = new URL(oscfile)
+            tmp.deleteOnExit // XXX
+            FileUtils.copyURLToFile(url, tmp)
+            tmp
+          }
+          else new File(oscfile)
+        val cr =
+          if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
+          else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
+          else new XmlChangeReader(file, true, CompressionMethod.None)
+        val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
+        cr.setChangeSink(ca)
+        cr.run
+        i = Int.MaxValue
+      }
+      catch {
+        case e: Exception =>
+          logger.info(s"Problem in osc2json, sleeping for ${i*2} seconds then trying again...")
+          Thread.sleep(i * 1000)
+          i=i*2
+      }
+    }
   }
 
 }

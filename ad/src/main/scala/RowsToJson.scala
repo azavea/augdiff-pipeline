@@ -181,13 +181,13 @@ object RowsToJson {
 
   // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
   private def getMultiLine(geoms: Seq[Geometry]): MultiLine = {
-    val lines: Seq[MultiLine] = geoms.map({ geom =>
+    val lines: Array[MultiLine] = geoms.map({ geom =>
       geom match {
         case geom: Line => MultiLine(geom)
         case geom: MultiLine => geom
         case _ => throw new Exception("Oh no")
       } })
-
+      .toArray
     def onion(left: MultiLine, right: MultiLine): MultiLine = {
       // (left.union(right)) match {
       //   case MultiLineResult(ml) => ml

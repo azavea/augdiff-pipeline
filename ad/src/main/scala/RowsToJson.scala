@@ -63,11 +63,150 @@ object RowsToJson {
       }).toMap
   }
 
+  /************* MULTIx *************/
+
+  // Predicate: does the first line-line edge meet the second line-line edge?
+  private def meets(a: (Int, Int), b: (Int, Int)): Boolean =
+    !Set(a._1, a._2).intersect(Set(b._1, b._2)).isEmpty
+
+  private def extractPath(graph: mutable.ArrayBuffer[(Int, Int)]): Array[(Int, Int)] = {
+    val path = mutable.ArrayBuffer.empty[(Int, Int)]
+    var current = graph.head; graph -= current; path += current
+    var rest = graph.filter({ pair => meets(pair, current) })
+
+    while(!rest.isEmpty) {
+      current = rest.head; graph -= current; path += current
+      rest = graph.filter({ pair => meets(pair, current) })
+    }
+
+    path.toArray
+  }
+
+  private def concatenate(lines: Array[Line]): Array[Array[Point]] = {
+    val graph = mutable.ArrayBuffer.empty[(Int, Int)]
+    val paths = mutable.ArrayBuffer.empty[Array[(Int, Int)]]
+
+    var i = 0; while (i < lines.length) {
+      val line1 = lines(i).points
+      var j = i+1; while (j < lines.length) {
+        val line2 = lines(j).points
+        if (line1.head == line2.head || line1.head == line2.tail) {
+          val pair = (i, j)
+          graph += pair
+        }
+        j=j+1
+      }
+      i=i+1
+    }
+
+    while (!graph.isEmpty)
+      paths += extractPath(graph)
+
+    paths.toArray.map({ path =>
+      val (a, b) = path.head
+      val points = (mutable.ArrayBuffer.empty[Point] ++= lines(a).points)
+      val points2 = lines(b).points
+      if (points2.head == points.last) points ++= points2.drop(1)
+      else points ++= points2.reverse.drop(1)
+
+      var i = 1; while (i < path.length) {
+        val (a, b) = path(i)
+        val (c, d) = path(i-1)
+        val index = (Set(a, b) &~ Set(c, d)).head
+        val points2 = lines(index).points
+        if (points2.head == points.last) points ++= points2.drop(1)
+        else points ++= points2.reverse.drop(1)
+        i=i+1
+      }
+      points.toArray
+    })
+  }
+
+  /************* MULTIPOLYGON *************/
+
+  // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
+  private def getMultiPolygon(geoms: Seq[Geometry]): MultiPolygon = {
+    val polys1: Array[MultiPolygon] = geoms.flatMap({ geom =>
+      geom match {
+        case geom: Polygon => Some(MultiPolygon(geom))
+        case geom: MultiPolygon => Some(geom)
+        case _ => None
+      } })
+      .toArray
+    val lines = geoms
+      .filter({ geom => geom.isInstanceOf[Line] })
+      .map({ geom => geom.asInstanceOf[Line] })
+      .toArray
+    val polys2: Array[MultiPolygon] = concatenate(lines).map({ points => MultiPolygon(Polygon(points)) })
+    val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
+
+    // // If a polygon is contained within another one, subtract the
+    // // smaller from the larger and delete the smaller.
+    // var i: Int = 0; while (i < polys.length) {
+    //   var j: Int = i+1; while (j < polys.length) {
+    //     if (polys(i).within(polys(j))) {
+    //       polys(j).difference(polys(i)) match {
+    //         case MultiPolygonResult(mp) =>
+    //           polys(j) = mp
+    //           polys(i) = null
+    //           j = polys.length
+    //         case _ =>
+    //       }
+    //     }
+    //     j=j+1
+    //   }
+    //   i=i+1
+    // }
+
+    def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon = {
+      // if (left.intersects(right)) {
+      //   left.jtsGeom.union(right.jtsGeom) match {
+      //     case p: jts.Polygon =>
+      //       println(s"$left $right $p")
+      //       MultiPolygon(p)
+      //     case mp: jts.MultiPolygon => MultiPolygon(mp)
+      //     case r: Any => throw new Exception(s"Oh no: $left $right $r")
+      //   }
+      // }
+      // else
+      MultiPolygon(left.polygons ++ right.polygons)
+    }
+
+    polys
+      // .filter(_ != null)
+      .reduce((l, r) => onion(l,r))
+  }
+
+  /************* MULTILINE *************/
+
+  // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
+  private def getMultiLine(geoms: Seq[Geometry]): MultiLine = {
+    val lines: Seq[MultiLine] = geoms.map({ geom =>
+      geom match {
+        case geom: Line => MultiLine(geom)
+        case geom: MultiLine => geom
+        case _ => throw new Exception("Oh no")
+      } })
+
+    def onion(left: MultiLine, right: MultiLine): MultiLine = {
+      // (left.union(right)) match {
+      //   case MultiLineResult(ml) => ml
+      //   case _ => throw new Exception("Oh No")
+      // }
+      MultiLine(left.lines ++ right.lines)
+    }
+
+    lines
+      .reduce((l, r) => onion(l,r))
+  }
+
+  /************* ENTRY POINT *************/
+
   def apply(fos: OutputStream, updateRows: Array[Row], allRows: Array[Row]) = {
 
     val windowSet = updateRows.toSet
 
-    /*********** NODES ***********/
+    /************* NODES *************/
 
     // Is the node complete? (Nodes always are.)
     def nodeCompletePredicate(row: Row): Boolean = true
@@ -81,7 +220,7 @@ object RowsToJson {
     val nodes = getRowHistories(allRows, "node", nodeCompletePredicate, nodeWindowPredicate, nodeBeforePredicate)
     val nodeIds: Set[Long] = nodes.map(_._1).toSet
 
-    /*********** WAYS ***********/
+    /************* WAYS *************/
 
     // Is the way complete?  (Does the set of augmented diff rows
     // contain everything needed to render the row [all of the
@@ -125,7 +264,7 @@ object RowsToJson {
     val ways = getRowHistories(allRows, "way", wayCompletePredicate, wayWindowPredicate, wayBeforePredicate)
     val wayIds: Set[Long] = ways.map(_._1).toSet
 
-    /*********** RELATIONS ***********/
+    /************* RELATIONS *************/
 
     val relationIds: Set[Long] = allRows
       .filter({ row => row.getString(2) == "relation" })
@@ -207,121 +346,7 @@ object RowsToJson {
 
     val relations = getRowHistories(allRows, "relation", relCompletePredicate, relWindowPredicate, relBeforePredicate)
 
-    /*********** RENDERING ***********/
-
-    // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
-    def getMultiLine(geoms: Seq[Geometry]): MultiLine = {
-      val lines: Seq[MultiLine] = geoms.map({ geom =>
-        geom match {
-          case geom: Line => MultiLine(geom)
-          case geom: MultiLine => geom
-          case _ => throw new Exception("Oh no")
-        } })
-
-      def onion(left: MultiLine, right: MultiLine): MultiLine = {
-        // (left.union(right)) match {
-        //   case MultiLineResult(ml) => ml
-        //   case _ => throw new Exception("Oh No")
-        // }
-        MultiLine(left.lines ++ right.lines)
-      }
-
-      lines
-        .reduce((l, r) => onion(l,r))
-    }
-
-    def linesToPolygons(lines: Array[Line]): Array[MultiPolygon] = {
-      val graph = mutable.ArrayBuffer.empty[(Int, Int)]
-
-      var i = 0; while (i < lines.length) {
-        val line1 = lines(i).points
-        var j = i+1; while (j < lines.length) {
-          val line2 = lines(j).points
-          if (line1.head == line2.head || line1.head == line2.tail) {
-            val pair = (i, j)
-            graph += pair
-          }
-          j=j+1
-        }
-        i=i+1
-      }
-
-      // lines.foreach({ line1 =>
-      //   lines.foreach({ line2 =>
-      //     if (line1 != line2) {
-      //       if (line1.points.last == line2.points.head) {
-      //         val p =
-      //           if (line2.last == line1.head) Polygon(line1.points ++ line2.points.drop(1))
-      //           else Polygon(line1.points ++ line2.points.drop(1) ++ line1.points.take(1))
-      //         mps += MultiPolygon(p)
-      //       }
-      //       else if (line1.head == line2.head) {
-      //         val line2points = line2.points.reverse
-      //         val p =
-      //           if (line2.last == line1.head) Polygon(line1.points ++ line2points.drop(1))
-      //           else Polygon(line1.points ++ line2points.drop(1) ++ line1.points.take(1))
-      //         mps += MultiPolygon(p)
-      //       }
-      //     }
-      //   })
-      // })
-
-      mps.toArray
-    }
-
-    // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
-    def getMultiPolygon(geoms: Seq[Geometry]): MultiPolygon = {
-      val polys1 = geoms.flatMap({ geom =>
-        geom match {
-          case geom: Polygon => Some(MultiPolygon(geom))
-          case geom: MultiPolygon => Some(geom)
-          case _ => None
-        } })
-        .toArray
-      val lines = geoms
-        .filter({ geom => geom.isInstanceOf[Line] })
-        .map({ geom => geom.asInstanceOf[Line] })
-        .toArray
-      val polys2 = linesToPolygons(lines)
-      // val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
-      val polys = polys2
-
-      // // If a polygon is contained within another one, subtract the
-      // // smaller from the larger and delete the smaller.
-      // var i: Int = 0; while (i < polys.length) {
-      //   var j: Int = i+1; while (j < polys.length) {
-      //     if (polys(i).within(polys(j))) {
-      //       polys(j).difference(polys(i)) match {
-      //         case MultiPolygonResult(mp) =>
-      //           polys(j) = mp
-      //           polys(i) = null
-      //           j = polys.length
-      //         case _ =>
-      //       }
-      //     }
-      //     j=j+1
-      //   }
-      //   i=i+1
-      // }
-
-      def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon = {
-        // if (left.intersects(right)) {
-        //   left.jtsGeom.union(right.jtsGeom) match {
-        //     case p: jts.Polygon =>
-        //       println(s"$left $right $p")
-        //       MultiPolygon(p)
-        //     case mp: jts.MultiPolygon => MultiPolygon(mp)
-        //     case r: Any => throw new Exception(s"Oh no: $left $right $r")
-        //   }
-        // }
-        // else
-        MultiPolygon(left.polygons ++ right.polygons)
-      }
-
-      polys
-        .filter(_ != null)
-        .reduce((l, r) => onion(l,r))
-    }
+    /************* RENDERING *************/
 
     // Renderable metadata
     def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {

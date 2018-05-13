@@ -113,6 +113,53 @@ object AugmentedDiff {
     (rows1 ++ rows2).distinct // rows from update ++ rows from storage
   }
 
+  def osc2json(
+    oscfile: String, jsonfile: String,
+    uri: String, props: java.util.Properties,
+    spark: SparkSession
+  ): Unit = {
+    var i: Int = 1; while (i <= (1<<8)) {
+      try {
+        val file =
+          if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
+            val path = new Path(oscfile)
+            val conf = spark.sparkContext.hadoopConfiguration
+            val uri = new URI(oscfile)
+            val fs = FileSystem.get(uri, conf)
+            val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+            tmp.deleteOnExit // XXX not sufficient for long-running process
+            fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
+            tmp
+          }
+          else if (oscfile.startsWith("http:")) {
+            val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+            val url = new URL(oscfile)
+            tmp.deleteOnExit // XXX
+            FileUtils.copyURLToFile(url, tmp)
+            tmp
+          }
+          else new File(oscfile)
+        val cr =
+          if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
+          else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
+          else new XmlChangeReader(file, true, CompressionMethod.None)
+        val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
+        cr.setChangeSink(ca)
+        cr.run
+        i = Int.MaxValue
+      }
+      catch {
+        case e: Exception =>
+          logger.info(s"Problem in osc2json, sleeping for ${i*2} seconds then trying again...")
+          Thread.sleep(i * 1000)
+          i=i*2
+      }
+    }
+  }
+
+  def numberToStr(n: Int): String =
+    (n.toString.reverse ++ "000").take(3).reverse
+
 }
 
 object AugmentedDiffApp extends CommandApp(
@@ -124,10 +171,12 @@ object AugmentedDiffApp extends CommandApp(
 
     Common.denoise
 
-    val oscfile =
-      Opts.option[String]("oscfile", help = "OSC file containing OSM data")
-    val jsonfile =
-      Opts.option[String]("jsonfile", help = "JSON file containing augmented diff")
+    val osctemplate =
+      Opts.option[String]("osctemplate", help = "OSC input template")
+    val jsontemplate =
+      Opts.option[String]("jsontemplate", help = "JSON output template")
+    val range =
+      Opts.option[String]("range", help = "The range of OSC files to consume")
     val postgresHost =
       Opts.option[String]("postgresHost", help = "PostgreSQL host").withDefault("localhost")
     val postgresPort =
@@ -139,8 +188,8 @@ object AugmentedDiffApp extends CommandApp(
     val postgresDb =
       Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
 
-    (oscfile, jsonfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
-      (oscfile, jsonfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+    (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
+      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -151,33 +200,20 @@ object AugmentedDiffApp extends CommandApp(
         ps
       }
 
-      val file: File =
-        if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
-          val path = new Path(oscfile)
-          val conf = spark.sparkContext.hadoopConfiguration
-          val uri = new URI(oscfile)
-          val fs = FileSystem.get(uri, conf)
-          val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
-          tmp.deleteOnExit // XXX
-          fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
-          tmp
-        }
-        else if (oscfile.startsWith("http:")) {
-          val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
-          val url = new URL(oscfile)
-          tmp.deleteOnExit // XXX
-          FileUtils.copyURLToFile(url, tmp)
-          tmp
-        }
-        else new File(oscfile)
-      val cr =
-        if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
-        else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
-        else new XmlChangeReader(file, true, CompressionMethod.None)
-      val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
-      cr.setChangeSink(ca)
-      cr.run
+      val stream = range.split(",") match {
+        case Array(start, "-1") => Stream.from(start.toInt)
+        case Array(start, end) => Stream.from(start.toInt).take(end.toInt - start.toInt + 1)
+        case _ => throw new Exception("Oh no")
+      }
 
+      stream.foreach({ i =>
+        val ccc = AugmentedDiff.numberToStr(i % 1000)
+        val bbb = AugmentedDiff.numberToStr((i / 1000) % 1000)
+        val aaa = AugmentedDiff.numberToStr((i / 1000000) % 1000)
+        val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
+        val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
+        AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, spark)
+      })
     })
   }
 )

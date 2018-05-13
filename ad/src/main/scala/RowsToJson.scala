@@ -67,30 +67,28 @@ object RowsToJson {
 
   // Predicate: does the first line-line edge meet the second line-line edge?
   private def meets(a: (Int, Int), b: (Int, Int)): Boolean =
-    !Set(a._1, a._2).intersect(Set(b._1, b._2)).isEmpty
+    !(Set(a._1, a._2) & Set(b._1, b._2)).isEmpty
 
-  private def extractPath(graph: mutable.ArrayBuffer[(Int, Int)]): Array[(Int, Int)] = {
+  private def extractPath(graph: mutable.Set[(Int, Int)]): Array[(Int, Int)] = {
     val path = mutable.ArrayBuffer.empty[(Int, Int)]
     var current = graph.head; graph -= current; path += current
-    var rest = graph.filter({ pair => meets(pair, current) })
-
+    var rest = graph.filter({ pair => meets(pair, current) }) // each line meets one and only one other line
     while(!rest.isEmpty) {
       current = rest.head; graph -= current; path += current
       rest = graph.filter({ pair => meets(pair, current) })
     }
-
     path.toArray
   }
 
   private def concatenate(lines: Array[Line]): Array[Array[Point]] = {
-    val graph = mutable.ArrayBuffer.empty[(Int, Int)]
+    val graph = mutable.Set.empty[(Int, Int)]
     val paths = mutable.ArrayBuffer.empty[Array[(Int, Int)]]
 
     var i = 0; while (i < lines.length) {
       val line1 = lines(i).points
       var j = i+1; while (j < lines.length) {
         val line2 = lines(j).points
-        if (line1.head == line2.head || line1.head == line2.tail) {
+        if (line1.head == line2.head || line1.head == line2.last) {
           val pair = (i, j)
           graph += pair
         }

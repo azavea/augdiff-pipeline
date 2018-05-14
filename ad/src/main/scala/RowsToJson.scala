@@ -141,19 +141,8 @@ object RowsToJson {
     //   i=i+1
     // }
 
-    def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon = {
-      // if (left.intersects(right)) {
-      //   left.jtsGeom.union(right.jtsGeom) match {
-      //     case p: jts.Polygon =>
-      //       println(s"$left $right $p")
-      //       MultiPolygon(p)
-      //     case mp: jts.MultiPolygon => MultiPolygon(mp)
-      //     case r: Any => throw new Exception(s"Oh no: $left $right $r")
-      //   }
-      // }
-      // else
+    def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon =
       MultiPolygon(left.polygons ++ right.polygons)
-    }
 
     if (polys.isEmpty) None
     else Some(polys.reduce((l, r) => onion(l,r)))

@@ -1,5 +1,6 @@
 package osmdiff
 
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql.Row
 
 import io.circe._
@@ -21,6 +22,12 @@ import java.io._
 
 
 object RowsToJson {
+
+  private val logger = {
+    val logger = Logger.getLogger(this.getClass)
+    logger.setLevel(Level.INFO)
+    logger
+  }
 
   sealed case class RowHistory(inWindow: Option[Row], beforeWindow: Option[Row])
 
@@ -63,64 +70,42 @@ object RowsToJson {
       }).toMap
   }
 
-  /************* MULTIx *************/
-
-  // Predicate: does the first line-line edge meet the second line-line edge?
-  private def meets(a: (Int, Int), b: (Int, Int)): Boolean =
-    !(Set(a._1, a._2) & Set(b._1, b._2)).isEmpty
-
-  private def extractPath(graph: mutable.Set[(Int, Int)]): Array[(Int, Int)] = {
-    val path = mutable.ArrayBuffer.empty[(Int, Int)]
-    var current = graph.head; graph -= current; path += current
-    var rest = graph.filter({ pair => meets(pair, current) }) // each line meets one and only one other line
-    while(!rest.isEmpty) {
-      current = rest.head; graph -= current; path += current
-      rest = graph.filter({ pair => meets(pair, current) })
-    }
-    path.toArray
-  }
-
-  private def concatenate(lines: Array[Line]): Array[Array[Point]] = {
-    val graph = mutable.Set.empty[(Int, Int)]
-    val paths = mutable.ArrayBuffer.empty[Array[(Int, Int)]]
-
-    var i = 0; while (i < lines.length) {
-      val line1 = lines(i).points
-      var j = i+1; while (j < lines.length) {
-        val line2 = lines(j).points
-        if (line1.head == line2.head || line1.head == line2.last) {
-          val pair = (i, j)
-          graph += pair
-        }
-        j=j+1
-      }
-      i=i+1
-    }
-
-    while (!graph.isEmpty)
-      paths += extractPath(graph)
-
-    paths.toArray.map({ path =>
-      val (a, b) = path.head
-      val points = (mutable.ArrayBuffer.empty[Point] ++= lines(a).points)
-      val points2 = lines(b).points
-      if (points2.head == points.last) points ++= points2.drop(1)
-      else points ++= points2.reverse.drop(1)
-
-      var i = 1; while (i < path.length) {
-        val (a, b) = path(i)
-        val (c, d) = path(i-1)
-        val index = (Set(a, b) &~ Set(c, d)).head
-        val points2 = lines(index).points
-        if (points2.head == points.last) points ++= points2.drop(1)
-        else points ++= points2.reverse.drop(1)
-        i=i+1
-      }
-      points.toArray
-    })
-  }
-
   /************* MULTIPOLYGON *************/
+
+  private def meets(a: Point, b: Point): Boolean =
+    (a == b)
+
+  private def linesToMultiPolygons(lines: Array[Line]): Array[MultiPolygon] = {
+    val used = mutable.Set.empty[Int]
+    val ms = mutable.ArrayBuffer.empty[MultiPolygon]
+
+    while (used.size < lines.length) {
+      logger.info(s"Constructing MultiPolygons: lines=${lines.length} used=${used.size}")
+      val start = Range(0, lines.length).filter({ i => !used.contains(i) }).head
+      val points = mutable.ArrayBuffer.empty[Point]
+
+      points ++= lines(start).points
+      used += start
+      var i = 0; while (i < lines.length) {
+        val line = lines(i).points
+        if (!used.contains(i) && meets(points.last, line.head)) {
+          points ++= line.drop(1)
+          used += i
+          i=0
+        }
+        else if (!used.contains(i) && meets(points.last, line.last)) {
+          points ++= line.reverse.drop(1)
+          used += i
+          i=0
+        }
+        else i=i+1
+      }
+
+      ms += MultiPolygon(Polygon(points))
+    }
+
+    ms.toArray
+  }
 
   // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
   private def getMultiPolygon(geoms: Seq[Geometry]): Option[MultiPolygon] = {
@@ -135,7 +120,7 @@ object RowsToJson {
       .filter({ geom => geom.isInstanceOf[Line] })
       .map({ geom => geom.asInstanceOf[Line] })
       .toArray
-    val polys2: Array[MultiPolygon] = concatenate(lines).map({ points => MultiPolygon(Polygon(points)) })
+    val polys2: Array[MultiPolygon] = linesToMultiPolygons(lines)
     val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
 
     // // If a polygon is contained within another one, subtract the
@@ -185,13 +170,9 @@ object RowsToJson {
         case _ => throw new Exception("Oh no")
       } })
       .toArray
-    def onion(left: MultiLine, right: MultiLine): MultiLine = {
-      // (left.union(right)) match {
-      //   case MultiLineResult(ml) => ml
-      //   case _ => throw new Exception("Oh No")
-      // }
+
+    def onion(left: MultiLine, right: MultiLine): MultiLine =
       MultiLine(left.lines ++ right.lines)
-    }
 
     if (lines.isEmpty) None
     else Some(lines.reduce((l, r) => onion(l,r)))

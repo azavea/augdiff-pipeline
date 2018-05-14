@@ -1,5 +1,6 @@
 package osmdiff
 
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql.Row
 
 import io.circe._
@@ -15,10 +16,18 @@ import spray.json.DefaultJsonProtocol._
 
 import scala.collection.mutable
 
+import com.vividsolutions.jts.{geom => jts}
+
 import java.io._
 
 
 object RowsToJson {
+
+  private val logger = {
+    val logger = Logger.getLogger(this.getClass)
+    logger.setLevel(Level.INFO)
+    logger
+  }
 
   sealed case class RowHistory(inWindow: Option[Row], beforeWindow: Option[Row])
 
@@ -39,7 +48,7 @@ object RowsToJson {
     beforePredicate: Row => Boolean
   ): Map[Long, RowHistory] = {
     rows
-      .filter({ row =>row.getString(2) == tipe })
+      .filter({ row => row.getString(2) == tipe })
       .groupBy({ row => row.getLong(1) }).toArray
       .map({ case (id: Long, rows: Array[Row]) =>
         val rowHistory = rows.sortBy({ row => -row.getTimestamp(9).getTime }).toStream
@@ -61,11 +70,110 @@ object RowsToJson {
       }).toMap
   }
 
+  /************* MULTIPOLYGON *************/
+
+  private def meets(a: Point, b: Point): Boolean =
+    (a == b)
+
+  private def linesToMultiPolygons(lines: Array[Line]): Array[MultiPolygon] = {
+    val used = mutable.Set.empty[Int]
+    val ms = mutable.ArrayBuffer.empty[MultiPolygon]
+
+    while (used.size < lines.length) {
+      logger.info(s"Constructing MultiPolygons: lines=${lines.length} used=${used.size}")
+      val start = Range(0, lines.length).filter({ i => !used.contains(i) }).head
+      val points = mutable.ArrayBuffer.empty[Point]
+
+      points ++= lines(start).points
+      used += start
+      var i = 0; while (i < lines.length) {
+        val line = lines(i).points
+        if (!used.contains(i) && meets(points.last, line.head)) {
+          points ++= line.drop(1)
+          used += i
+          i=0
+        }
+        else if (!used.contains(i) && meets(points.last, line.last)) {
+          points ++= line.reverse.drop(1)
+          used += i
+          i=0
+        }
+        else i=i+1
+      }
+
+      ms += MultiPolygon(Polygon(points))
+    }
+
+    ms.toArray
+  }
+
+  // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
+  private def getMultiPolygon(geoms: Seq[Geometry]): Option[MultiPolygon] = {
+    val polys1: Array[MultiPolygon] = geoms.flatMap({ geom =>
+      geom match {
+        case geom: Polygon => Some(MultiPolygon(geom))
+        case geom: MultiPolygon => Some(geom)
+        case _ => None
+      } })
+      .toArray
+    val lines = geoms
+      .filter({ geom => geom.isInstanceOf[Line] })
+      .map({ geom => geom.asInstanceOf[Line] })
+      .toArray
+    val polys2: Array[MultiPolygon] = linesToMultiPolygons(lines)
+    val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
+
+    // // If a polygon is contained within another one, subtract the
+    // // smaller from the larger and delete the smaller.
+    // var i: Int = 0; while (i < polys.length) {
+    //   var j: Int = i+1; while (j < polys.length) {
+    //     if (polys(i).within(polys(j))) {
+    //       polys(j).difference(polys(i)) match {
+    //         case MultiPolygonResult(mp) =>
+    //           polys(j) = mp
+    //           polys(i) = null
+    //           j = polys.length
+    //         case _ =>
+    //       }
+    //     }
+    //     j=j+1
+    //   }
+    //   i=i+1
+    // }
+
+    def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon =
+      MultiPolygon(left.polygons ++ right.polygons)
+
+    if (polys.isEmpty) None
+    else Some(polys.reduce((l, r) => onion(l,r)))
+  }
+
+  /************* MULTILINE *************/
+
+  // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
+  private def getMultiLine(geoms: Seq[Geometry]): Option[MultiLine] = {
+    val lines: Array[MultiLine] = geoms.map({ geom =>
+      geom match {
+        case geom: Line => MultiLine(geom)
+        case geom: MultiLine => geom
+        case _ => throw new Exception("Oh no")
+      } })
+      .toArray
+
+    def onion(left: MultiLine, right: MultiLine): MultiLine =
+      MultiLine(left.lines ++ right.lines)
+
+    if (lines.isEmpty) None
+    else Some(lines.reduce((l, r) => onion(l,r)))
+  }
+
+  /************* ENTRY POINT *************/
+
   def apply(fos: OutputStream, updateRows: Array[Row], allRows: Array[Row]) = {
 
     val windowSet = updateRows.toSet
 
-    /*********** NODES ***********/
+    /************* NODES *************/
 
     // Is the node complete? (Nodes always are.)
     def nodeCompletePredicate(row: Row): Boolean = true
@@ -79,9 +187,11 @@ object RowsToJson {
     val nodes = getRowHistories(allRows, "node", nodeCompletePredicate, nodeWindowPredicate, nodeBeforePredicate)
     val nodeIds: Set[Long] = nodes.map(_._1).toSet
 
-    /*********** WAYS ***********/
+    /************* WAYS *************/
 
-    // Is the way complete?  (Does the set of augmented diff rows contain everything needed to render the row [all of the nodes]?)
+    // Is the way complete?  (Does the set of augmented diff rows
+    // contain everything needed to render the row [all of the
+    // nodes]?)
     def wayCompletePredicate(row: Row): Boolean = {
       val nds: List[Long] = row.get(6) match {
         case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map(_.getLong(0)).toList
@@ -121,7 +231,7 @@ object RowsToJson {
     val ways = getRowHistories(allRows, "way", wayCompletePredicate, wayWindowPredicate, wayBeforePredicate)
     val wayIds: Set[Long] = ways.map(_._1).toSet
 
-    /*********** RELATIONS ***********/
+    /************* RELATIONS *************/
 
     val relationIds: Set[Long] = allRows
       .filter({ row => row.getString(2) == "relation" })
@@ -135,7 +245,8 @@ object RowsToJson {
         id -> rows.sortBy({ row => -row.getTimestamp(9).getTime }).head
       }).toMap
 
-    // Does the augmented diff row-set contain everything needed to render this relation?
+    // Does the augmented diff row-set contain everything needed to
+    // render this relation?
     def relCompletePredicate(row: Row): Boolean = {
       val members: List[Row] = row.get(7) match {
         case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toList
@@ -163,7 +274,7 @@ object RowsToJson {
         val relMembers = members
           .filter(_.getString(0) == "relation")
           .map(_.getLong(1))
-          .map({ id => _relations.getOrElse(id, throw new Exception("Oh no")) })
+          .flatMap({ id => _relations.get(id) })
         val nodesYes = nodeMembers
           .map({ id => nodes.getOrElse(id, RowHistory(None, None)) })
           .exists({ row => row.inWindow != None })
@@ -188,7 +299,7 @@ object RowsToJson {
         val relMembers = members
           .filter(_.getString(0) == "relation")
           .map(_.getLong(1))
-          .map({ id => _relations.getOrElse(id, throw new Exception("Oh no")) })
+          .flatMap({ id => _relations.get(id) })
         val nodesYes = nodeMembers
           .map({ id => nodes.getOrElse(id, RowHistory(None, None)) })
           .forall({ row => row.beforeWindow != None })
@@ -202,7 +313,7 @@ object RowsToJson {
 
     val relations = getRowHistories(allRows, "relation", relCompletePredicate, relWindowPredicate, relBeforePredicate)
 
-    /*********** RENDERING ***********/
+    /************* RENDERING *************/
 
     // Renderable metadata
     def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {
@@ -249,7 +360,7 @@ object RowsToJson {
             case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toArray
             case members: Array[Row] => members.asInstanceOf[Array[Row]].toArray
           }
-          val members = _members.map({ member =>
+          val members = _members.flatMap({ member =>
             val tipe = member.getString(0)
             val id = member.getLong(1)
             val row = tipe match {
@@ -259,14 +370,36 @@ object RowsToJson {
               case _ => throw new Exception("Oh no")
             }
             (inWindow, row) match {
-              case (true, RowHistory(Some(inWindow), _)) => inWindow
-              case (true, RowHistory(None, Some(beforeWindow))) => beforeWindow
-              case (false, RowHistory(_, Some(beforeWindow))) => beforeWindow
-              case _ => throw new Exception("Oh no")
+              case (true, RowHistory(Some(inWindow), _)) => Some(inWindow)
+              case (true, RowHistory(None, Some(beforeWindow))) => Some(beforeWindow)
+              case (false, RowHistory(_, Some(beforeWindow))) => Some(beforeWindow)
+           // case _ => throw new Exception("Oh no")
+              case _ => None
             }
           })
           val geoms = members.map({ row => getGeometry(row, inWindow = inWindow) })
-          GeometryCollection(geoms)
+          val map = row.getMap(3).asInstanceOf[Map[String, String]]
+
+          val mp1 = map.contains("boundary")
+          val mp2 = map.get("type") match {
+            case Some("multipolygon") | Some("boundary")=> true
+            case _ => false
+          }
+          val mp3 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[Polygon] || geom.isInstanceOf[MultiPolygon] })
+          val ml1 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[MultiLine] })
+
+          if ((mp1 || mp2) && mp3) {
+            getMultiPolygon(geoms) match {
+              case Some(mp) => mp
+              case None => GeometryCollection(geoms)
+            }
+          } else if (ml1) {
+            getMultiLine(geoms) match {
+              case Some(ml) => ml
+              case None => GeometryCollection(geoms)
+            }
+          }
+          else GeometryCollection(geoms)
       }
     }
 

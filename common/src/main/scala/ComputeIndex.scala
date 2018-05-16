@@ -72,7 +72,6 @@ object ComputeIndex {
 
   def apply(
     rows: DataFrame,
-    persistence: Option[StorageLevel],
     partitions: Option[Int] = None
   ): DataFrame = {
     logger.info(s"◻ Computing Index")

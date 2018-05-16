@@ -39,10 +39,12 @@ object PostgresBackend {
     val connection = java.sql.DriverManager.getConnection(uri, props)
     val statement = connection.createStatement
 
+    connection.setAutoCommit(false)
     edges.foreach({ edge =>
       val sql = s"insert into ${tableName} (a, b) values ($edge.a, $edge.b);"
       statement.executeUpdate(sql)
     })
+    connection.commit
 
     statement.close
     connection.close

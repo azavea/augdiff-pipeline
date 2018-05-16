@@ -57,7 +57,6 @@ object Indexer extends CommandApp(
 
       PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
       OrcBackend.saveBulk(osm, "osm", external, partitions, "overwrite")
-
     })
   }
 )

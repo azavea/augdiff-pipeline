@@ -28,6 +28,13 @@ object PostgresBackend {
       .write
       .mode(mode)
       .jdbc(uri, tableName, props)
+
+    val connection = java.sql.DriverManager.getConnection(uri, props)
+    val statement = connection.createStatement
+    statement.executeUpdate(s"create index idx_a on $tableName (a);")
+    statement.executeUpdate(s"create index idx_b on $tableName (b);")
+    statement.close
+    connection.close
   }
 
   def saveIndex(

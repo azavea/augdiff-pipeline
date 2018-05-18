@@ -132,7 +132,7 @@ package object osm {
 
   private lazy val logger = Logger.getLogger(getClass)
 
-  private val _isArea = (tags: Map[String, String]) =>
+  val _isArea = (tags: Map[String, String]) =>
     tags match {
       case _ if tags.contains("area") && BooleanValues.contains(tags("area").toLowerCase) =>
         TruthyValues.contains(tags("area").toLowerCase)

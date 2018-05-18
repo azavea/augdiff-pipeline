@@ -276,7 +276,8 @@ object RowsToJson {
               }
             })
             .map({ row => Point(row.getDecimal(5).doubleValue(), row.getDecimal(4).doubleValue()) })
-          if (nds.head == nds.last) Polygon(points); else Line(points)
+          val tags = row.getMap(3).asInstanceOf[Map[String, String]]
+          if (osmesa.functions.osm._isArea(tags)) Polygon(points); else Line(points)
         case "relation" =>
           val _members: Array[Row] = row.get(7) match {
             case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toArray

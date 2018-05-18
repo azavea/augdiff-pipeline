@@ -56,5 +56,3 @@ COPY scripts/start-hdfs.sh /opt/start-hdfs.sh
 COPY scripts/start-hiveserver2.sh /opt/start-hiveserver2.sh
 COPY scripts/peek.sh /opt/peek.sh
 COPY scripts/poke.sh /opt/poke.sh
-COPY hive/hive-site.xml ${HIVE_CONF_DIR}/hive-site.xml
-COPY hive/hive-site.xml ${SPARK_CONF_DIR}/hive-site.xml

@@ -143,6 +143,9 @@ class ChangeAugmenter(
     logger.info("close")
 
     val diff = osm.toArray
+    val osmDf = spark.createDataFrame(
+      spark.sparkContext.parallelize(diff, 1),
+      StructType(Common.osmSchema))
     val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
     val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges)
     val fos =
@@ -155,9 +158,8 @@ class ChangeAugmenter(
       else new FileOutputStream(new File(jsonfile))
 
     RowsToJson(fos, diff, augmentedDiff)
-
-    // OrcBackend.saveBulk(osmDf, "osm", "append")
-    // PostgresBackend.saveIndex(index, uri, props, "index")
+    PostgresBackend.saveIndex(newEdges, uri, props, "index")
+    OrcBackend.saveBulk(osmDf, "osm", None, None, "append")
   }
 
 }

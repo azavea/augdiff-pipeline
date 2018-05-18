@@ -24,8 +24,6 @@ object Indexer extends CommandApp(
       Opts.option[String]("orcfile", help = "ORC file containing OSM data")
     val partitions =
       Opts.option[Int]("partitions", help = "Number of partitions to use").orNone
-    val persistence =
-      Opts.option[String]("persistence", help = "Storage-level to use during indexing").orNone
     val postgresHost =
       Opts.option[String]("postgresHost", help = "PostgreSQL host").withDefault("localhost")
     val postgresPort =
@@ -39,18 +37,9 @@ object Indexer extends CommandApp(
     val external =
       Opts.option[String]("external", help = "External location of OSM table").orNone
 
-    (orcfile, partitions, persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
-      (orcfile, partitions, _persistence, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
+    (orcfile, partitions, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
+      (orcfile, partitions, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
 
-      val persistence = _persistence match {
-        case Some("memory_only") | Some("MEMORY_ONLY") => Some(StorageLevel.MEMORY_ONLY)
-        case Some("memory_and_disk") | Some("MEMORY_AND_DISK") => Some(StorageLevel.MEMORY_AND_DISK)
-        case Some("memory_only_ser") | Some("MEMORY_ONLY_SER") => Some(StorageLevel.MEMORY_ONLY_SER)
-        case Some("memory_and_disk_ser") | Some("MEMORY_AND_DISK_SER") => Some(StorageLevel.MEMORY_AND_DISK_SER)
-        case Some("disk_only") | Some("DISK_ONLY") => Some(StorageLevel.DISK_ONLY)
-        case Some("off_heap") | Some("OFF_HEAP") => Some(StorageLevel.OFF_HEAP)
-        case _ => None
-      }
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
         val ps = new java.util.Properties()
@@ -64,11 +53,10 @@ object Indexer extends CommandApp(
         .read.orc(orcfile)
         .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
         .select(Common.osmColumns: _*)
-      val index = ComputeIndex(osm, persistence, partitions)
+      val index = ComputeIndex(osm, partitions)
 
       PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
       OrcBackend.saveBulk(osm, "osm", external, partitions, "overwrite")
-
     })
   }
 )

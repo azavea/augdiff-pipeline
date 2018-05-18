@@ -48,4 +48,5 @@ lazy val indexer = (project in file ("indexer"))
 
 lazy val ad = (project in file ("ad"))
   .dependsOn(common)
+  .dependsOn(osmesaIngest)
   .settings(commonSettings: _*)

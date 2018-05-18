@@ -377,20 +377,24 @@ object RowsToJson {
               case _ => None
             }
           })
+          val id = row.getLong(1)
+          val version = row.getLong(12).toInt
+          val timestamp = row.getTimestamp(9)
+          val types = _members.map({ member => member.getString(0) match {
+            case "node" => osmesa.ProcessOSM.NodeType
+            case "way" => osmesa.ProcessOSM.WayType
+            case "relation" => osmesa.ProcessOSM.RelationType
+            case _ => null.asInstanceOf[Byte]
+          } })
+          val roles = _members.map({ member => member.getString(2) })
           val geoms = members.map({ row => getGeometry(row, inWindow = inWindow) })
-          val map = row.getMap(3).asInstanceOf[Map[String, String]]
-
-          val mp1 = map.contains("boundary")
-          val mp2 = map.get("type") match {
-            case Some("multipolygon") | Some("boundary")=> true
-            case _ => false
-          }
-          val mp3 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[Polygon] || geom.isInstanceOf[MultiPolygon] })
+          val wkbs = geoms.map({ geom => geom.toWKB(4326) })
+          val tags = row.getMap(3).asInstanceOf[Map[String, String]]
           val ml1 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[MultiLine] })
 
-          if ((mp1 || mp2) && mp3) {
-            getMultiPolygon(geoms) match {
-              case Some(mp) => mp
+          if (osmesa.functions.osm._isMultiPolygon(tags)) {
+            osmesa.functions.osm.buildMultiPolygon(id, version, timestamp, types, roles, wkbs) match {
+              case Some(wkb) => wkb.readWKB
               case None => GeometryCollection(geoms)
             }
           } else if (ml1) {

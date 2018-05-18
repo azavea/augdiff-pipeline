@@ -144,7 +144,7 @@ package object osm {
 
   val isArea: UserDefinedFunction = udf(_isArea)
 
-  private val _isMultiPolygon = (tags: Map[String, String]) =>
+  val _isMultiPolygon = (tags: Map[String, String]) =>
     tags.contains("type") && MultiPolygonTypes.contains(tags("type").toLowerCase)
 
   val isMultiPolygon: UserDefinedFunction = udf(_isMultiPolygon)

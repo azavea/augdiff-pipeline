@@ -6,4 +6,4 @@ set -x
 sleep 5s
 
 schematool -dbType postgres -initSchema
-echo "ALTER TABLE \"TBLS\" ALTER COLUMN \"IS_REWRITE_ENABLED\" DROP NOT NULL;" | PGPASSWORD=hive psql -h metastore-database -U hive -d metastore
+echo "ALTER TABLE \"TBLS\" ALTER COLUMN \"IS_REWRITE_ENABLED\" DROP NOT NULL;" | PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB

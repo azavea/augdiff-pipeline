@@ -21,11 +21,21 @@ services:
   metastore-init:
     image: quay.io/azavea/hive:latest
     command: bash -c "/opt/poke.sh"
+    environment:
+      - POSTGRES_HOST=database
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
     links:
       - metastore-database:database
   metastore-info:
     image: quay.io/azavea/hive:latest
     command: bash -c "/opt/peek.sh"
+    environment:
+      - POSTGRES_HOST=database
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
     links:
       - metastore-database:database
   hive:
@@ -36,5 +46,10 @@ services:
       dockerfile: Dockerfile
     links:
       - metastore-database:database
+    environment:
+      - POSTGRES_HOST=database
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
     ports:
       - "10000:10000"

@@ -70,84 +70,6 @@ object RowsToJson {
       }).toMap
   }
 
-  /************* MULTIPOLYGON *************/
-
-  private def meets(a: Point, b: Point): Boolean =
-    (a == b)
-
-  private def linesToMultiPolygons(lines: Array[Line]): Array[MultiPolygon] = {
-    val used = mutable.Set.empty[Int]
-    val ms = mutable.ArrayBuffer.empty[MultiPolygon]
-
-    while (used.size < lines.length) {
-      logger.info(s"Constructing MultiPolygons: lines=${lines.length} used=${used.size}")
-      val start = Range(0, lines.length).filter({ i => !used.contains(i) }).head
-      val points = mutable.ArrayBuffer.empty[Point]
-
-      points ++= lines(start).points
-      used += start
-      var i = 0; while (i < lines.length) {
-        val line = lines(i).points
-        if (!used.contains(i) && meets(points.last, line.head)) {
-          points ++= line.drop(1)
-          used += i
-          i=0
-        }
-        else if (!used.contains(i) && meets(points.last, line.last)) {
-          points ++= line.reverse.drop(1)
-          used += i
-          i=0
-        }
-        else i=i+1
-      }
-
-      ms += MultiPolygon(Polygon(points))
-    }
-
-    ms.toArray
-  }
-
-  // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
-  private def getMultiPolygon(geoms: Seq[Geometry]): Option[MultiPolygon] = {
-    val polys1: Array[MultiPolygon] = geoms.flatMap({ geom =>
-      geom match {
-        case geom: Polygon => Some(MultiPolygon(geom))
-        case geom: MultiPolygon => Some(geom)
-        case _ => None
-      } })
-      .toArray
-    val lines = geoms
-      .filter({ geom => geom.isInstanceOf[Line] })
-      .map({ geom => geom.asInstanceOf[Line] })
-      .toArray
-    val polys2: Array[MultiPolygon] = linesToMultiPolygons(lines)
-    val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
-
-    // // If a polygon is contained within another one, subtract the
-    // // smaller from the larger and delete the smaller.
-    // var i: Int = 0; while (i < polys.length) {
-    //   var j: Int = i+1; while (j < polys.length) {
-    //     if (polys(i).within(polys(j))) {
-    //       polys(j).difference(polys(i)) match {
-    //         case MultiPolygonResult(mp) =>
-    //           polys(j) = mp
-    //           polys(i) = null
-    //           j = polys.length
-    //         case _ =>
-    //       }
-    //     }
-    //     j=j+1
-    //   }
-    //   i=i+1
-    // }
-
-    def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon =
-      MultiPolygon(left.polygons ++ right.polygons)
-
-    if (polys.isEmpty) None
-    else Some(polys.reduce((l, r) => onion(l,r)))
-  }
-
   /************* MULTILINE *************/
 
   // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
@@ -373,7 +295,6 @@ object RowsToJson {
               case (true, RowHistory(Some(inWindow), _)) => Some(inWindow)
               case (true, RowHistory(None, Some(beforeWindow))) => Some(beforeWindow)
               case (false, RowHistory(_, Some(beforeWindow))) => Some(beforeWindow)
-           // case _ => throw new Exception("Oh no")
               case _ => None
             }
           })
@@ -443,7 +364,6 @@ object RowsToJson {
     // Close JSON file
     p.flush
     p.close
-
   }
 
 }

@@ -19,7 +19,8 @@ lazy val commonSettings = Seq(
   ),
   resolvers ++= Seq(
     "jcraft" at "https://mvnrepository.com/artifact/com.jcraft/jsch",
-    "jets3t" at "https://mvnrepository.com/artifact/net.java.dev.jets3t/jets3t"
+    "jets3t" at "https://mvnrepository.com/artifact/net.java.dev.jets3t/jets3t",
+    "osgeo" at "http://download.osgeo.org/webdav/geotools/"
   ),
   assemblyMergeStrategy in assembly := {
     case s if s.startsWith("META-INF/services") => MergeStrategy.concat
@@ -38,10 +39,14 @@ lazy val root = (project in file("."))
 lazy val common = (project in file("common"))
   .settings(commonSettings: _*)
 
+lazy val osmesaIngest = (project in file("ingest"))
+  .settings(commonSettings: _*)
+
 lazy val indexer = (project in file ("indexer"))
   .dependsOn(common)
   .settings(commonSettings: _*)
 
 lazy val ad = (project in file ("ad"))
   .dependsOn(common)
+  .dependsOn(osmesaIngest)
   .settings(commonSettings: _*)

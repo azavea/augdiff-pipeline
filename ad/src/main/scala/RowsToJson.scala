@@ -70,84 +70,6 @@ object RowsToJson {
       }).toMap
   }
 
-  /************* MULTIPOLYGON *************/
-
-  private def meets(a: Point, b: Point): Boolean =
-    (a == b)
-
-  private def linesToMultiPolygons(lines: Array[Line]): Array[MultiPolygon] = {
-    val used = mutable.Set.empty[Int]
-    val ms = mutable.ArrayBuffer.empty[MultiPolygon]
-
-    while (used.size < lines.length) {
-      logger.info(s"Constructing MultiPolygons: lines=${lines.length} used=${used.size}")
-      val start = Range(0, lines.length).filter({ i => !used.contains(i) }).head
-      val points = mutable.ArrayBuffer.empty[Point]
-
-      points ++= lines(start).points
-      used += start
-      var i = 0; while (i < lines.length) {
-        val line = lines(i).points
-        if (!used.contains(i) && meets(points.last, line.head)) {
-          points ++= line.drop(1)
-          used += i
-          i=0
-        }
-        else if (!used.contains(i) && meets(points.last, line.last)) {
-          points ++= line.reverse.drop(1)
-          used += i
-          i=0
-        }
-        else i=i+1
-      }
-
-      ms += MultiPolygon(Polygon(points))
-    }
-
-    ms.toArray
-  }
-
-  // Faint shadow of https://wiki.openstreetmap.org/wiki/Relation:multipolygon
-  private def getMultiPolygon(geoms: Seq[Geometry]): Option[MultiPolygon] = {
-    val polys1: Array[MultiPolygon] = geoms.flatMap({ geom =>
-      geom match {
-        case geom: Polygon => Some(MultiPolygon(geom))
-        case geom: MultiPolygon => Some(geom)
-        case _ => None
-      } })
-      .toArray
-    val lines = geoms
-      .filter({ geom => geom.isInstanceOf[Line] })
-      .map({ geom => geom.asInstanceOf[Line] })
-      .toArray
-    val polys2: Array[MultiPolygon] = linesToMultiPolygons(lines)
-    val polys = (polys1 ++ polys2).sortBy(_.area).toArray // Polygons ordered smallest to largest
-
-    // // If a polygon is contained within another one, subtract the
-    // // smaller from the larger and delete the smaller.
-    // var i: Int = 0; while (i < polys.length) {
-    //   var j: Int = i+1; while (j < polys.length) {
-    //     if (polys(i).within(polys(j))) {
-    //       polys(j).difference(polys(i)) match {
-    //         case MultiPolygonResult(mp) =>
-    //           polys(j) = mp
-    //           polys(i) = null
-    //           j = polys.length
-    //         case _ =>
-    //       }
-    //     }
-    //     j=j+1
-    //   }
-    //   i=i+1
-    // }
-
-    def onion(left: MultiPolygon, right: MultiPolygon): MultiPolygon =
-      MultiPolygon(left.polygons ++ right.polygons)
-
-    if (polys.isEmpty) None
-    else Some(polys.reduce((l, r) => onion(l,r)))
-  }
-
   /************* MULTILINE *************/
 
   // See: https://wiki.openstreetmap.org/wiki/Relation:multilinestring
@@ -354,7 +276,8 @@ object RowsToJson {
               }
             })
             .map({ row => Point(row.getDecimal(5).doubleValue(), row.getDecimal(4).doubleValue()) })
-          if (nds.head == nds.last) Polygon(points); else Line(points)
+          val tags = row.getMap(3).asInstanceOf[Map[String, String]]
+          if (osmesa.functions.osm._isArea(tags)) Polygon(points); else Line(points)
         case "relation" =>
           val _members: Array[Row] = row.get(7) match {
             case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toArray
@@ -373,24 +296,27 @@ object RowsToJson {
               case (true, RowHistory(Some(inWindow), _)) => Some(inWindow)
               case (true, RowHistory(None, Some(beforeWindow))) => Some(beforeWindow)
               case (false, RowHistory(_, Some(beforeWindow))) => Some(beforeWindow)
-           // case _ => throw new Exception("Oh no")
               case _ => None
             }
           })
+          val id = row.getLong(1)
+          val version = row.getLong(12).toInt
+          val timestamp = row.getTimestamp(9)
+          val types = _members.map({ member => member.getString(0) match {
+            case "node" => osmesa.ProcessOSM.NodeType
+            case "way" => osmesa.ProcessOSM.WayType
+            case "relation" => osmesa.ProcessOSM.RelationType
+            case _ => null.asInstanceOf[Byte]
+          } })
+          val roles = _members.map({ member => member.getString(2) })
           val geoms = members.map({ row => getGeometry(row, inWindow = inWindow) })
-          val map = row.getMap(3).asInstanceOf[Map[String, String]]
-
-          val mp1 = map.contains("boundary")
-          val mp2 = map.get("type") match {
-            case Some("multipolygon") | Some("boundary")=> true
-            case _ => false
-          }
-          val mp3 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[Polygon] || geom.isInstanceOf[MultiPolygon] })
+          val wkbs = geoms.map({ geom => geom.toWKB(4326) })
+          val tags = row.getMap(3).asInstanceOf[Map[String, String]]
           val ml1 = geoms.forall({ geom => geom.isInstanceOf[Line] || geom.isInstanceOf[MultiLine] })
 
-          if ((mp1 || mp2) && mp3) {
-            getMultiPolygon(geoms) match {
-              case Some(mp) => mp
+          if (osmesa.functions.osm._isMultiPolygon(tags)) {
+            osmesa.functions.osm.buildMultiPolygon(id, version, timestamp, types, roles, wkbs) match {
+              case Some(wkb) => wkb.readWKB
               case None => GeometryCollection(geoms)
             }
           } else if (ml1) {
@@ -439,7 +365,6 @@ object RowsToJson {
     // Close JSON file
     p.flush
     p.close
-
   }
 
 }

@@ -149,7 +149,7 @@ object AugmentedDiff {
         i = Int.MaxValue
       }
       catch {
-        case e: Exception =>
+        case e @ (_ : java.net.ConnectException | _ : java.io.IOException | _ : java.io.FileNotFoundException | _ : com.amazonaws.AmazonClientException | _ : org.openstreetmap.osmosis.core.OsmosisRuntimeException) =>
           logger.info(s"Problem in osc2json, sleeping for ${i*2} seconds then trying again...")
           Thread.sleep(i * 1000)
           i=i*2

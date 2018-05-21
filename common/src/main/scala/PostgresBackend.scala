@@ -48,7 +48,7 @@ object PostgresBackend {
 
     connection.setAutoCommit(false)
     edges.foreach({ edge =>
-      val sql = s"insert into ${tableName} (a, b) values ($edge.a, $edge.b);"
+      val sql = s"insert into ${tableName} (a, b) values (${edge.a}, ${edge.b});"
       statement.executeUpdate(sql)
     })
     connection.commit

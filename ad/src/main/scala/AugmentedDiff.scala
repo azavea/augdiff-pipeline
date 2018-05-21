@@ -232,6 +232,7 @@ object AugmentedDiffApp extends CommandApp(
         val aaa = AugmentedDiff.numberToStr((i / 1000000) % 1000)
         val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
+        AugmentedDiff.logger.info(s"$oscfile -> $jsonfile")
         AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, spark)
       })
     })

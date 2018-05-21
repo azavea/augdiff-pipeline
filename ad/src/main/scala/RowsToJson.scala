@@ -260,7 +260,7 @@ object RowsToJson {
       row.getString(2) match {
         case "node" =>
           Point(row.getDecimal(5).doubleValue(), row.getDecimal(4).doubleValue())
-        case "way" =>
+        case "way" => {
           val nds: Array[Long] = row.get(6) match {
             case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map({ row => row.getLong(0) }).toArray
             case nds: Array[Row] => nds.asInstanceOf[Array[Row]].map({ row => row.getLong(0) }).toArray
@@ -268,7 +268,7 @@ object RowsToJson {
           val points = nds
             .map({ id =>
               val row = nodes.get(id).get
-              (inWindow, row) match {
+                (inWindow, row) match {
                 case (true, RowHistory(Some(inWindow), _)) => inWindow
                 case (true, RowHistory(None, Some(beforeWindow))) => beforeWindow
                 case (false, RowHistory(_, Some(beforeWindow))) => beforeWindow
@@ -277,8 +277,11 @@ object RowsToJson {
             })
             .map({ row => Point(row.getDecimal(5).doubleValue(), row.getDecimal(4).doubleValue()) })
           val tags = row.getMap(3).asInstanceOf[Map[String, String]]
-          if (osmesa.functions.osm._isArea(tags)) Polygon(points); else Line(points)
-        case "relation" =>
+
+          if (osmesa.functions.osm._isArea(tags) && (points.head == points.last)) Polygon(points)
+          else Line(points)
+        }
+        case "relation" => {
           val _members: Array[Row] = row.get(7) match {
             case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toArray
             case members: Array[Row] => members.asInstanceOf[Array[Row]].toArray
@@ -292,7 +295,7 @@ object RowsToJson {
               case "relation" => relations.get(id).get
               case _ => throw new Exception("Oh no")
             }
-            (inWindow, row) match {
+              (inWindow, row) match {
               case (true, RowHistory(Some(inWindow), _)) => Some(inWindow)
               case (true, RowHistory(None, Some(beforeWindow))) => Some(beforeWindow)
               case (false, RowHistory(_, Some(beforeWindow))) => Some(beforeWindow)
@@ -326,6 +329,7 @@ object RowsToJson {
             }
           }
           else GeometryCollection(geoms)
+        }
       }
     }
 

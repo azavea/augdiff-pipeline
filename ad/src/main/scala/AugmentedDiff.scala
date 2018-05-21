@@ -119,40 +119,60 @@ object AugmentedDiff {
     spark: SparkSession
   ): Unit = {
     var i: Int = 1; while (i <= (1<<8)) {
-      try {
-        val file =
+      // File
+      val file: File =
+        try {
           if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
             val path = new Path(oscfile)
             val conf = spark.sparkContext.hadoopConfiguration
             val uri = new URI(oscfile)
             val fs = FileSystem.get(uri, conf)
-            val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
-            tmp.deleteOnExit // XXX not sufficient for long-running process
+            val tmp = File.createTempFile("abcdefg", ".osc")
+            tmp.deleteOnExit // XXX probably not sufficient for long-running process
             fs.copyToLocalFile(path, new Path(tmp.getAbsolutePath))
             tmp
           }
-          else if (oscfile.startsWith("http:")) {
-            val tmp = File.createTempFile("Supercalifragilisticexpialidocious", ".osc")
+          else if (oscfile.startsWith("http:") || oscfile.startsWith("https:")) {
+            val tmp = File.createTempFile("abcdefg", ".osc")
             val url = new URL(oscfile)
-            tmp.deleteOnExit // XXX
+            tmp.deleteOnExit // XXX probably not sufficient for long-running process
             FileUtils.copyURLToFile(url, tmp)
             tmp
           }
-          else new File(oscfile)
+          else {
+            val tmp = new File(oscfile)
+            tmp.setWritable(false)
+            if (!tmp.exists || tmp.isDirectory) throw new java.io.IOException
+            tmp
+          }
+        }
+        catch {
+          case e @ (_ : java.net.ConnectException | _ : java.io.IOException | _ : java.io.FileNotFoundException | _ : com.amazonaws.AmazonClientException) =>
+            i=i*2
+            logger.info(s"Problem opening $oscfile, sleeping for $i seconds then trying again...")
+            Thread.sleep(i * 1000)
+            null
+        }
+
+      // Change Reader, Change Augmenter
+      if (file != null) {
         val cr =
           if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
           else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
           else new XmlChangeReader(file, true, CompressionMethod.None)
         val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
+
         cr.setChangeSink(ca)
-        cr.run
-        i = Int.MaxValue
-      }
-      catch {
-        case e @ (_ : java.net.ConnectException | _ : java.io.IOException | _ : java.io.FileNotFoundException | _ : com.amazonaws.AmazonClientException | _ : org.openstreetmap.osmosis.core.OsmosisRuntimeException) =>
-          logger.info(s"Problem in osc2json, sleeping for ${i*2} seconds then trying again...")
-          Thread.sleep(i * 1000)
-          i=i*2
+        try {
+          cr.run
+          i = Int.MaxValue
+        }
+        catch {
+          case e: org.openstreetmap.osmosis.core.OsmosisRuntimeException =>
+            i=i*2
+            logger.info(s"Problem parsing $oscfile, sleeping for $i seconds then trying again...")
+            Thread.sleep(i*1000)
+        }
       }
     }
   }

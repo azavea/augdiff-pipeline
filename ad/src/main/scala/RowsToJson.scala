@@ -31,6 +31,14 @@ object RowsToJson {
     logger
   }
 
+  private def clean(str: String, tags: String): String = {
+    str
+      .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags)
+      .replaceAll("\"(\\d+)\"", "$1")
+      .replaceAll("\"true\"", "true")
+      .replaceAll("\"false\"", "false")
+  }
+
   sealed case class RowHistory(inWindow: Option[Row], beforeWindow: Option[Row])
 
   // Turn the set of augmented diff rows into a collection of
@@ -357,23 +365,17 @@ object RowsToJson {
             if (visibleNow) getMetadata(beforeWindow, visible = Some(false))
             else getMetadata(beforeWindow)
 
-          val feature1 = Feature(geometry1, metadata1)
-            .toJson.toString
-            .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags1)
+          val feature1 = clean(Feature(geometry1, metadata1).toJson.toString, tags1)
           p.write(feature1 + "\n")
           if (visibleNow) {
-            val feature2 = Feature(geometry2, metadata2)
-              .toJson.toString
-              .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags2)
+            val feature2 = clean(Feature(geometry2, metadata2).toJson.toString, tags2)
             p.write(feature2 + "\n")
           }
         case RowHistory(Some(inWindow), None) => // create
           if (inWindow.getBoolean(13)) {
             val geometry3 = getGeometry(inWindow, inWindow = true)
             val (tags3, metadata3) = getMetadata(inWindow)
-            val feature3 = Feature(geometry3, metadata3)
-              .toJson.toString
-              .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags3)
+            val feature3 = clean(Feature(geometry3, metadata3).toJson.toString, tags3)
             p.write(feature3 + "\n")
           }
         case _ =>

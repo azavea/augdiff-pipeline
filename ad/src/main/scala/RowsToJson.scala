@@ -244,7 +244,7 @@ object RowsToJson {
         "type" -> row.getString(2),
         "tags" -> row.getMap(3).asInstanceOf[Map[String, String]].toJson.toString,
         "changeset" -> row.getLong(8).toString,
-        "timestamp" -> row.getTimestamp(9).toString,
+        "timestamp" -> row.getTimestamp(9).toInstant.toString,
         "uid" -> row.getLong(10).toString,
         "user" -> row.getString(11),
         "version" -> row.getLong(12).toString,

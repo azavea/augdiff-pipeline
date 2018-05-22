@@ -153,7 +153,7 @@ class ChangeAugmenter(
 
     RowsToJson(fos, diff, augmentedDiff)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
-    OrcBackend.saveBulk(osmDf, "osm", None, None, "append")
+    OrcBackend.saveBulk(osmDf, "osm", None, "append")
   }
 
   def close(): Unit = {}

@@ -19,7 +19,6 @@ object OrcBackend {
     bulk: DataFrame,
     tableName: String,
     externalLocation: Option[String],
-    partitions: Option[Int],
     mode: String
   ): Unit = {
     val options = externalLocation match {
@@ -27,11 +26,9 @@ object OrcBackend {
       case None => Map.empty[String, String]
     }
     logger.info(s"Writing OSM as ORC files")
-    val sorted = partitions match {
-      case Some(n) => bulk.orderBy("p", "id", "type").repartition(n)
-      case None => bulk.orderBy("p", "id", "type")
-    }
-    sorted
+    bulk
+      .repartition(col("p"))
+      .sortWithinPartitions(col("id"), col("type"))
       .write
       .mode(mode)
       .format("orc")

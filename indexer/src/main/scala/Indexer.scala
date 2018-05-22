@@ -22,8 +22,6 @@ object Indexer extends CommandApp(
 
     val orcfile =
       Opts.option[String]("orcfile", help = "ORC file containing OSM data")
-    val partitions =
-      Opts.option[Int]("partitions", help = "Number of partitions to use").orNone
     val postgresHost =
       Opts.option[String]("postgresHost", help = "PostgreSQL host").withDefault("localhost")
     val postgresPort =
@@ -37,8 +35,8 @@ object Indexer extends CommandApp(
     val external =
       Opts.option[String]("external", help = "External location of OSM table").orNone
 
-    (orcfile, partitions, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
-      (orcfile, partitions, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
+    (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
+      (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -53,10 +51,10 @@ object Indexer extends CommandApp(
         .read.orc(orcfile)
         .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
         .select(Common.osmColumns: _*)
-      val index = ComputeIndex(osm, partitions)
+      val index = ComputeIndex(osm)
 
       PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
-      OrcBackend.saveBulk(osm, "osm", external, partitions, "overwrite")
+      OrcBackend.saveBulk(osm, "osm", external, "overwrite")
     })
   }
 )

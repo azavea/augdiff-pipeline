@@ -70,10 +70,7 @@ object ComputeIndex {
     halfEdgesFromNodes.union(halfEdgesFromRelations)
   }
 
-  def apply(
-    rows: DataFrame,
-    partitions: Option[Int] = None
-  ): DataFrame = {
+  def apply(rows: DataFrame): DataFrame = {
     logger.info(s"◻ Computing Index")
 
     val edgeDf = edgesFromRows(rows)

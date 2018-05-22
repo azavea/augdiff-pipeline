@@ -23,6 +23,8 @@ import java.io._
 
 object RowsToJson {
 
+  private val VERY_UNIQUE_STRING = "GNpoWCpYkit/MQJD7evm6mVs0c/2vuPmmcSMS4H6pmQ="
+
   private val logger = {
     val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
@@ -238,21 +240,24 @@ object RowsToJson {
     /************* RENDERING *************/
 
     // Renderable metadata
-    def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {
-      Map(
-        "id" -> row.getLong(1).toString,
-        "type" -> row.getString(2),
-        "tags" -> row.getMap(3).asInstanceOf[Map[String, String]].toJson.toString,
-        "changeset" -> row.getLong(8).toString,
-        "timestamp" -> row.getTimestamp(9).toInstant.toString,
-        "uid" -> row.getLong(10).toString,
-        "user" -> row.getString(11),
-        "version" -> row.getLong(12).toString,
-        "visible" -> (visible match {
-          case None => row.getBoolean(13).toString
-          case Some(visible) => visible.toString
-        })
-      )
+    def getMetadata(row: Row, visible: Option[Boolean] = None): (String, Map[String, String]) = {
+      val tags = row.getMap(3).asInstanceOf[Map[String, String]].toJson.toString
+      val metadata =
+        Map(
+          "id" -> row.getLong(1).toString,
+          "type" -> row.getString(2),
+          "tags" -> VERY_UNIQUE_STRING,
+          "changeset" -> row.getLong(8).toString,
+          "timestamp" -> row.getTimestamp(9).toInstant.toString,
+          "uid" -> row.getLong(10).toString,
+          "user" -> row.getString(11),
+          "version" -> row.getLong(12).toString,
+          "visible" -> (visible match {
+            case None => row.getBoolean(13).toString
+            case Some(visible) => visible.toString
+          })
+        )
+      (tags, metadata)
     }
 
     // Renderable geometry
@@ -341,26 +346,35 @@ object RowsToJson {
       row match {
         case RowHistory(Some(inWindow), Some(beforeWindow)) => // delete, modify
           val visibleNow = inWindow.getBoolean(13)
-          val p1 =
+          val geometry1 =
             if (visibleNow) getGeometry(inWindow, inWindow = true)
             else getGeometry(beforeWindow, inWindow = false)
-          val p2 = getGeometry(beforeWindow, inWindow = false)
-          val m1 =
+          val geometry2 = getGeometry(beforeWindow, inWindow = false)
+          val (tags1, metadata1) =
             if (visibleNow) getMetadata(inWindow)
             else getMetadata(beforeWindow, visible = Some(false))
-          val m2 =
+          val (tags2, metadata2) =
             if (visibleNow) getMetadata(beforeWindow, visible = Some(false))
             else getMetadata(beforeWindow)
 
-          p.write(Feature(p1, m1).toJson.toString + "\n")
+          val feature1 = Feature(geometry1, metadata1)
+            .toJson.toString
+            .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags1)
+          p.write(feature1 + "\n")
           if (visibleNow) {
-            p.write(Feature(p2, m2).toJson.toString + "\n")
+            val feature2 = Feature(geometry2, metadata2)
+              .toJson.toString
+              .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags2)
+            p.write(feature2 + "\n")
           }
         case RowHistory(Some(inWindow), None) => // create
           if (inWindow.getBoolean(13)) {
-            val p1 = getGeometry(inWindow, inWindow = true)
-            val m1 = getMetadata(inWindow)
-            p.write(Feature(p1, m1).toJson.toString + "\n")
+            val geometry3 = getGeometry(inWindow, inWindow = true)
+            val (tags3, metadata3) = getMetadata(inWindow)
+            val feature3 = Feature(geometry3, metadata3)
+              .toJson.toString
+              .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags3)
+            p.write(feature3 + "\n")
           }
         case _ =>
       }

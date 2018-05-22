@@ -21,10 +21,16 @@ object OrcBackend {
     externalLocation: Option[String],
     mode: String
   ): Unit = {
-    val options = externalLocation match {
+    val options1 = Map(
+      "orc.create.index" -> "true",
+      "orc.row.index.stride" -> "1000",
+      "orc.bloom.filter.columns" -> "id"
+    )
+    val options2 = externalLocation match {
       case Some(location) => Map("path"-> location)
       case None => Map.empty[String, String]
     }
+
     logger.info(s"Writing OSM as ORC files")
     bulk
       .repartition(col("p"))
@@ -32,7 +38,7 @@ object OrcBackend {
       .write
       .mode(mode)
       .format("orc")
-      .options(options)
+      .options(options1 ++ options2)
       .partitionBy("p")
       .saveAsTable(tableName)
   }

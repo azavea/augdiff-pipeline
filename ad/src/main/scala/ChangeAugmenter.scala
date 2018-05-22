@@ -131,16 +131,10 @@ class ChangeAugmenter(
 
   }
 
-  def initialize(m: java.util.Map[String,Object]): Unit = {
-    logger.info(s"initialize: ${m.entrySet.toArray.toList}")
-  }
+  def initialize(m: java.util.Map[String,Object]): Unit = {}
 
   def complete(): Unit = {
     logger.info("complete")
-  }
-
-  def close(): Unit = {
-    logger.info("close")
 
     val diff = osm.toArray
     val osmDf = spark.createDataFrame(
@@ -159,7 +153,9 @@ class ChangeAugmenter(
 
     RowsToJson(fos, diff, augmentedDiff)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
-    OrcBackend.saveBulk(osmDf, "osm", None, None, "append")
+    OrcBackend.saveBulk(osmDf, "osm", None, "append")
   }
+
+  def close(): Unit = {}
 
 }

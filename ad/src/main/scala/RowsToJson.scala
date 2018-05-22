@@ -23,10 +23,20 @@ import java.io._
 
 object RowsToJson {
 
+  private val VERY_UNIQUE_STRING = "GNpoWCpYkit/MQJD7evm6mVs0c/2vuPmmcSMS4H6pmQ="
+
   private val logger = {
     val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
     logger
+  }
+
+  private def clean(str: String, tags: String): String = {
+    str
+      .replaceAll("\"" + VERY_UNIQUE_STRING + "\"", tags)
+      .replaceAll("\"(\\d+)\"", "$1")
+      .replaceAll("\"true\"", "true")
+      .replaceAll("\"false\"", "false")
   }
 
   sealed case class RowHistory(inWindow: Option[Row], beforeWindow: Option[Row])
@@ -238,21 +248,24 @@ object RowsToJson {
     /************* RENDERING *************/
 
     // Renderable metadata
-    def getMetadata(row: Row, visible: Option[Boolean] = None): Map[String, String] = {
-      Map(
-        "id" -> row.getLong(1).toString,
-        "type" -> row.getString(2),
-        "tags" -> row.getMap(3).asInstanceOf[Map[String, String]].toJson.toString,
-        "changeset" -> row.getLong(8).toString,
-        "timestamp" -> row.getTimestamp(9).toString,
-        "uid" -> row.getLong(10).toString,
-        "user" -> row.getString(11),
-        "version" -> row.getLong(12).toString,
-        "visible" -> (visible match {
-          case None => row.getBoolean(13).toString
-          case Some(visible) => visible.toString
-        })
-      )
+    def getMetadata(row: Row, visible: Option[Boolean] = None): (String, Map[String, String]) = {
+      val tags = row.getMap(3).asInstanceOf[Map[String, String]].toJson.toString
+      val metadata =
+        Map(
+          "id" -> row.getLong(1).toString,
+          "type" -> row.getString(2),
+          "tags" -> VERY_UNIQUE_STRING,
+          "changeset" -> row.getLong(8).toString,
+          "timestamp" -> row.getTimestamp(9).toInstant.toString,
+          "uid" -> row.getLong(10).toString,
+          "user" -> row.getString(11),
+          "version" -> row.getLong(12).toString,
+          "visible" -> (visible match {
+            case None => row.getBoolean(13).toString
+            case Some(visible) => visible.toString
+          })
+        )
+      (tags, metadata)
     }
 
     // Renderable geometry
@@ -260,7 +273,7 @@ object RowsToJson {
       row.getString(2) match {
         case "node" =>
           Point(row.getDecimal(5).doubleValue(), row.getDecimal(4).doubleValue())
-        case "way" =>
+        case "way" => {
           val nds: Array[Long] = row.get(6) match {
             case nds: Seq[Row] => nds.asInstanceOf[Seq[Row]].map({ row => row.getLong(0) }).toArray
             case nds: Array[Row] => nds.asInstanceOf[Array[Row]].map({ row => row.getLong(0) }).toArray
@@ -268,7 +281,7 @@ object RowsToJson {
           val points = nds
             .map({ id =>
               val row = nodes.get(id).get
-              (inWindow, row) match {
+                (inWindow, row) match {
                 case (true, RowHistory(Some(inWindow), _)) => inWindow
                 case (true, RowHistory(None, Some(beforeWindow))) => beforeWindow
                 case (false, RowHistory(_, Some(beforeWindow))) => beforeWindow
@@ -277,8 +290,11 @@ object RowsToJson {
             })
             .map({ row => Point(row.getDecimal(5).doubleValue(), row.getDecimal(4).doubleValue()) })
           val tags = row.getMap(3).asInstanceOf[Map[String, String]]
-          if (osmesa.functions.osm._isArea(tags)) Polygon(points); else Line(points)
-        case "relation" =>
+
+          if (osmesa.functions.osm._isArea(tags) && (points.head == points.last)) Polygon(points)
+          else Line(points)
+        }
+        case "relation" => {
           val _members: Array[Row] = row.get(7) match {
             case members: Seq[Row] => members.asInstanceOf[Seq[Row]].toArray
             case members: Array[Row] => members.asInstanceOf[Array[Row]].toArray
@@ -292,7 +308,7 @@ object RowsToJson {
               case "relation" => relations.get(id).get
               case _ => throw new Exception("Oh no")
             }
-            (inWindow, row) match {
+              (inWindow, row) match {
               case (true, RowHistory(Some(inWindow), _)) => Some(inWindow)
               case (true, RowHistory(None, Some(beforeWindow))) => Some(beforeWindow)
               case (false, RowHistory(_, Some(beforeWindow))) => Some(beforeWindow)
@@ -326,6 +342,7 @@ object RowsToJson {
             }
           }
           else GeometryCollection(geoms)
+        }
       }
     }
 
@@ -337,26 +354,29 @@ object RowsToJson {
       row match {
         case RowHistory(Some(inWindow), Some(beforeWindow)) => // delete, modify
           val visibleNow = inWindow.getBoolean(13)
-          val p1 =
+          val geometry1 =
             if (visibleNow) getGeometry(inWindow, inWindow = true)
             else getGeometry(beforeWindow, inWindow = false)
-          val p2 = getGeometry(beforeWindow, inWindow = false)
-          val m1 =
+          val geometry2 = getGeometry(beforeWindow, inWindow = false)
+          val (tags1, metadata1) =
             if (visibleNow) getMetadata(inWindow)
             else getMetadata(beforeWindow, visible = Some(false))
-          val m2 =
+          val (tags2, metadata2) =
             if (visibleNow) getMetadata(beforeWindow, visible = Some(false))
             else getMetadata(beforeWindow)
 
-          p.write(Feature(p1, m1).toJson.toString + "\n")
+          val feature1 = clean(Feature(geometry1, metadata1).toJson.toString, tags1)
+          p.write(feature1 + "\n")
           if (visibleNow) {
-            p.write(Feature(p2, m2).toJson.toString + "\n")
+            val feature2 = clean(Feature(geometry2, metadata2).toJson.toString, tags2)
+            p.write(feature2 + "\n")
           }
         case RowHistory(Some(inWindow), None) => // create
           if (inWindow.getBoolean(13)) {
-            val p1 = getGeometry(inWindow, inWindow = true)
-            val m1 = getMetadata(inWindow)
-            p.write(Feature(p1, m1).toJson.toString + "\n")
+            val geometry3 = getGeometry(inWindow, inWindow = true)
+            val (tags3, metadata3) = getMetadata(inWindow)
+            val feature3 = clean(Feature(geometry3, metadata3).toJson.toString, tags3)
+            p.write(feature3 + "\n")
           }
         case _ =>
       }

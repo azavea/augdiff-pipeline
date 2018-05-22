@@ -30,7 +30,7 @@ object Common {
   val pfLimit = 150 // Partition filter size limit
   val idLimit = 4096 // Predicate pushdown size limit
 
-  private val bits = 16
+  private val bits = 12
 
   def pairToLongFn(id: Long, tipe: String): Long = {
     val typeBits = tipe match {

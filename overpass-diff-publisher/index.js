@@ -100,7 +100,7 @@ _(
   AugmentedDiffs({
     baseURL: process.env.OVERPASS_URL,
     infinite: true,
-    initialSequence // 2926437 sequence contains changes to RI
+    initialSequence
   })
     .pipe(processor)
     .pipe(extractor)

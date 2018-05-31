@@ -50,3 +50,7 @@ lazy val ad = (project in file ("ad"))
   .dependsOn(common)
   .dependsOn(osmesaIngest)
   .settings(commonSettings: _*)
+
+lazy val tileUpdater = (project in file("vt-updater"))
+  .dependsOn(common)
+  .settings(commonSettings: _*)

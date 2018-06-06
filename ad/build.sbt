@@ -8,6 +8,7 @@ libraryDependencies ++= Seq(
   "io.circe"                    %% "circe-generic"     % "0.9.3",
   "io.circe"                    %% "circe-parser"      % "0.9.3",
   "org.apache.hadoop"            % "hadoop-aws"        % "2.7.3",
+  "org.apache.orc"               % "orc-core"          % "1.5.1",
   "org.apache.spark"            %% "spark-core"        % "2.3.0" % "provided",
   "org.apache.spark"            %% "spark-hive"        % "2.3.0" % "provided",
   "org.apache.spark"            %% "spark-sql"         % "2.3.0" % "provided",

@@ -106,7 +106,8 @@ object ChangeAugmenter {
 class ChangeAugmenter(
   spark: SparkSession,
   uri: String, props: java.util.Properties,
-  jsonfile: String
+  jsonfile: String,
+  externalLocation: String
 ) extends ChangeSink {
   import ChangeAugmenter._
 
@@ -153,7 +154,7 @@ class ChangeAugmenter(
 
     RowsToJson(fos, diff, augmentedDiff)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
-    OrcBackend.saveBulk(osmDf, "osm", None, "append")
+    OrcBackend.saveBulk(osmDf, "osm", externalLocation, "append")
   }
 
   def close(): Unit = {}

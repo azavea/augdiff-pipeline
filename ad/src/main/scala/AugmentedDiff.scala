@@ -116,6 +116,7 @@ object AugmentedDiff {
   def osc2json(
     oscfile: String, jsonfile: String,
     uri: String, props: java.util.Properties,
+    externalLocation: String,
     spark: SparkSession
   ): Unit = {
     var i: Int = 1; while (i <= (1<<8)) {
@@ -160,7 +161,7 @@ object AugmentedDiff {
           if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
           else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
           else new XmlChangeReader(file, true, CompressionMethod.None)
-        val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
+        val ca = new ChangeAugmenter(spark, uri, props, jsonfile, externalLocation)
 
         cr.setChangeSink(ca)
         try {
@@ -207,9 +208,11 @@ object AugmentedDiffApp extends CommandApp(
       Opts.option[String]("postgresPassword", help = "PostgreSQL password").withDefault("hive")
     val postgresDb =
       Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
+    val external =
+      Opts.option[String]("external", help = "External location of OSM table")
 
-    (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
-      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+    (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
+      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -233,7 +236,7 @@ object AugmentedDiffApp extends CommandApp(
         val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         AugmentedDiff.logger.info(s"$oscfile -> $jsonfile")
-        AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, spark)
+        AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, external, spark)
       })
     })
   }

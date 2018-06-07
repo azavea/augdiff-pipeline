@@ -33,7 +33,7 @@ object Indexer extends CommandApp(
     val postgresDb =
       Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
     val external =
-      Opts.option[String]("external", help = "External location of OSM table").orNone
+      Opts.option[String]("external", help = "External location of OSM table")
 
     (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
       (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>

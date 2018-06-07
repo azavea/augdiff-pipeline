@@ -18,18 +18,15 @@ object OrcBackend {
   def saveBulk(
     bulk: DataFrame,
     tableName: String,
-    externalLocation: Option[String],
+    externalLocation: String,
     mode: String
   ): Unit = {
-    val options1 = Map(
+    val options = Map(
+      "orc.bloom.filter.columns" -> "id",
       "orc.create.index" -> "true",
       "orc.row.index.stride" -> "1000",
-      "orc.bloom.filter.columns" -> "id"
+      "path" -> externalLocation
     )
-    val options2 = externalLocation match {
-      case Some(location) => Map("path"-> location)
-      case None => Map.empty[String, String]
-    }
 
     logger.info(s"Writing OSM as ORC files")
     bulk
@@ -38,7 +35,7 @@ object OrcBackend {
       .write
       .mode(mode)
       .format("orc")
-      .options(options1 ++ options2)
+      .options(options)
       .partitionBy("p")
       .saveAsTable(tableName)
   }

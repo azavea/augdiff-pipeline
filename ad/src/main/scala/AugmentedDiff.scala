@@ -76,10 +76,11 @@ object AugmentedDiff {
     val triples = triples1 ++ triples2 // triples from all of the rows
     val desired = triples.map({ triple => (triple._2, triple._3) }) // all desired (id, type) pairs
     val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
+    println(keyedTriples)
 
     logger.info(s"● Reading ${keyedTriples.size} partitions in groups of ${Common.pfLimit}")
 
-    val osm = OrcBackend.load(spark, "osm", externalLocation)
+    val osm = OrcBackend.load(spark, "osm", externalLocation, keyedTriples)
 
     // The gymnastics involving keyedTriples are to allow all desired
     // (id, type) pairs to be read out of storage using partition

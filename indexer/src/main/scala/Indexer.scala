@@ -54,7 +54,7 @@ object Indexer extends CommandApp(
       val index = ComputeIndex(osm)
 
       PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
-      OrcBackend.saveBulk(osm, "osm", external, "overwrite")
+      OrcBackend.save(osm, "osm", external, "overwrite")
     })
   }
 )

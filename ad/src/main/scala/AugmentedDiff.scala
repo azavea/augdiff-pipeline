@@ -40,10 +40,9 @@ object AugmentedDiff {
   def augment(
     spark: SparkSession,
     rows1: Array[Row],
-    edges: Set[ComputeIndexLocal.Edge]
+    edges: Set[ComputeIndexLocal.Edge],
+    externalLocation: String
   ): Array[Row] = {
-    val osm = spark.table("osm").select(Common.osmColumns: _*)
-
     // Convert (id, type) pairs to packed representations (both values
     // stored in one long).
     val rowLongs = rows1.map({ row =>
@@ -79,6 +78,8 @@ object AugmentedDiff {
     val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
 
     logger.info(s"● Reading ${keyedTriples.size} partitions in groups of ${Common.pfLimit}")
+
+    val osm = OrcBackend.load(spark, "osm", externalLocation)
 
     // The gymnastics involving keyedTriples are to allow all desired
     // (id, type) pairs to be read out of storage using partition

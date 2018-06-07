@@ -142,7 +142,7 @@ class ChangeAugmenter(
       spark.sparkContext.parallelize(diff, 1),
       StructType(Common.osmSchema))
     val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
-    val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges)
+    val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges, externalLocation)
     val fos =
       if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
         val path = new Path(jsonfile)
@@ -154,7 +154,7 @@ class ChangeAugmenter(
 
     RowsToJson(fos, diff, augmentedDiff)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
-    OrcBackend.saveBulk(osmDf, "osm", externalLocation, "append")
+    OrcBackend.save(osmDf, "osm", externalLocation, "append")
   }
 
   def close(): Unit = {}

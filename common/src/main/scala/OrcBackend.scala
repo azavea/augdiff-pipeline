@@ -52,11 +52,23 @@ object OrcBackend {
       val batch = reader.getSchema.createRowBatch
 
       while(rows.nextBatch(batch)) {
-        val ids = batch.cols(1).asInstanceOf[vector.LongColumnVector]
-        val types = batch.cols(2).asInstanceOf[vector.BytesColumnVector]
-      }
+        val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // XXX p column dropped (due to partitioned write?)
+        val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector] // XXX p column dropped (due to partitioned write?)
+        Range(0, batch.size).foreach({ i =>
+          val idIndex = if (ids.isRepeating) 0; else i
+          val typeIndex = if (types.isRepeating) 0; else i
+          val id: Long = ids.vector(idIndex)
+          val tipe: String = {
+            val start = types.start(typeIndex)
+            val length = types.length(typeIndex)
+            types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
+          }
+          val pair = (id, tipe)
 
-      rows.close
+          if (pairs.contains(pair)) println(id, tipe)
+        })
+        rows.close
+      }
     })
 
     spark.table("osm").select(Common.osmColumns: _*)

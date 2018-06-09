@@ -5,6 +5,7 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
 import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.conf.Configuration
 
 import org.apache.orc
 import org.apache.orc.storage.ql.exec.vector
@@ -18,6 +19,38 @@ object OrcBackend {
     val logger = Logger.getLogger(this.getClass)
     logger.setLevel(Level.INFO)
     logger
+  }
+
+  def loadFile(
+    path: Path,
+    pairs: Set[(Long, String)],
+    conf: Configuration
+  ): Unit = {
+    val options1 = orc.OrcFile.readerOptions(conf)
+    val reader = orc.OrcFile.createReader(path, options1)
+    val options2 = reader.options
+    val rows = reader.rows(options2)
+    val batch = reader.getSchema.createRowBatch
+
+    // https://orc.apache.org/docs/core-java.html
+    while(rows.nextBatch(batch)) {
+      val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // XXX p column dropped (due to partitioned write?)
+      val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector] // XXX p column dropped (due to partitioned write?)
+      Range(0, batch.size).foreach({ i =>
+        val idIndex = if (ids.isRepeating) 0; else i
+        val typeIndex = if (types.isRepeating) 0; else i
+        val id: Long = ids.vector(idIndex)
+        val tipe: String = {
+          val start = types.start(typeIndex)
+          val length = types.length(typeIndex)
+          types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
+        }
+        val pair = (id, tipe)
+
+        if (pairs.contains(pair)) println(id, tipe)
+      })
+      rows.close
+    }
   }
 
   def load(
@@ -43,32 +76,8 @@ object OrcBackend {
       }
     }
 
-    // https://orc.apache.org/docs/core-java.html
-    val options1 = orc.OrcFile.readerOptions(conf)
     paths.toArray.foreach({ path =>
-      val reader = orc.OrcFile.createReader(path, options1)
-      val options2 = reader.options
-      val rows = reader.rows(options2)
-      val batch = reader.getSchema.createRowBatch
-
-      while(rows.nextBatch(batch)) {
-        val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // XXX p column dropped (due to partitioned write?)
-        val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector] // XXX p column dropped (due to partitioned write?)
-        Range(0, batch.size).foreach({ i =>
-          val idIndex = if (ids.isRepeating) 0; else i
-          val typeIndex = if (types.isRepeating) 0; else i
-          val id: Long = ids.vector(idIndex)
-          val tipe: String = {
-            val start = types.start(typeIndex)
-            val length = types.length(typeIndex)
-            types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
-          }
-          val pair = (id, tipe)
-
-          if (pairs.contains(pair)) println(id, tipe)
-        })
-        rows.close
-      }
+      loadFile(path, pairs, conf)
     })
 
     spark.table("osm").select(Common.osmColumns: _*)

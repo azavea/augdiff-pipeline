@@ -40,6 +40,9 @@ object OrcBackend {
       val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
       val lats = batch.cols(3).asInstanceOf[vector.DecimalColumnVector]
       val lons = batch.cols(4).asInstanceOf[vector.DecimalColumnVector]
+      val ndss = batch.cols(5).asInstanceOf[vector.ListColumnVector]
+      val ndssField = ndss.child.asInstanceOf[vector.StructColumnVector].fields(0).asInstanceOf[vector.LongColumnVector]
+      val memberss = batch.cols(6).asInstanceOf[vector.ListColumnVector]
 
       Range(0, batch.size).foreach({ i =>
         val idIndex = if (ids.isRepeating) 0; else i
@@ -47,6 +50,7 @@ object OrcBackend {
         val tagsIndex = if (tagss.isRepeating) 0; else i
         val latIndex = if (lats.isRepeating) 0; else i
         val lonIndex = if (lons.isRepeating) 0; else i
+        val ndsIndex = if (ndss.isRepeating) 0; else i
 
         val id: Long =
           if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
@@ -59,10 +63,10 @@ object OrcBackend {
           }
           else null
         val tags: Map[String, String] =
-          if (tagss.noNulls || !types.isNull(tagsIndex)) {
+          if (tagss.noNulls || !tagss.isNull(tagsIndex)) {
             val offset = tagss.offsets(tagsIndex).toInt
             val length = tagss.lengths(tagsIndex).toInt
-            Range(offset, offset + length).map({ j =>
+            Range(offset, offset+length).map({ j =>
               val keyIndex = if (tagKeys.isRepeating) 0; else j
               val valueIndex = if (tagValues.isRepeating) 0; else j
               val key: String = tagKeys.vector(keyIndex).drop(tagKeys.start(keyIndex)).take(tagKeys.length(keyIndex)).map(_.toChar).mkString
@@ -71,19 +75,33 @@ object OrcBackend {
             }).toMap
           }
           else null
-        lazy val lat: java.math.BigDecimal =
-          if (lats.noNulls || !types.isNull(latIndex))
+        val lat: java.math.BigDecimal =
+          if (lats.noNulls || !lats.isNull(latIndex))
             lats.vector(latIndex).getHiveDecimal.bigDecimalValue
           else null
-        lazy val lon: java.math.BigDecimal =
-          if (lons.noNulls || !types.isNull(lonIndex))
+        val lon: java.math.BigDecimal =
+          if (lons.noNulls || !lons.isNull(lonIndex))
             lons.vector(lonIndex).getHiveDecimal.bigDecimalValue
           else null
+        val nds: Array[Long] =
+          if (ndss.noNulls || !ndss.isNull(ndsIndex)) {
+            val offset = ndss.offsets(ndsIndex).toInt
+            val length = ndss.lengths(ndsIndex).toInt
+            Range(offset, offset+length).toArray.map({ j =>
+              val index = if (ndssField.isRepeating) 0; else j
+              ndssField.vector(index)
+            })
+          }
+          else Array.empty[Long]
 
         val pair = (id, tipe)
         if (pairs.contains(pair)) {
           if (tipe == "node") {
-            println(Row(id, tipe, tags, lat, lon))
+            // println(Row(id, tipe, tags, lat, lon, null))
+          }
+          else if (tipe == "way") {
+            println(Row(id, tipe, tags, null, null, nds))
+            println(nds.toList)
           }
         }
       })

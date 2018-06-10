@@ -26,10 +26,8 @@ object OrcBackend {
     pairs: Set[(Long, String)],
     conf: Configuration
   ): Unit = {
-    val options1 = orc.OrcFile.readerOptions(conf)
-    val reader = orc.OrcFile.createReader(path, options1)
-    val options2 = reader.options
-    val rows = reader.rows(options2)
+    val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
+    val rows = reader.rows(reader.options)
     val batch = reader.getSchema.createRowBatch
 
     // https://orc.apache.org/docs/core-java.html
@@ -39,12 +37,17 @@ object OrcBackend {
       Range(0, batch.size).foreach({ i =>
         val idIndex = if (ids.isRepeating) 0; else i
         val typeIndex = if (types.isRepeating) 0; else i
-        val id: Long = ids.vector(idIndex)
-        val tipe: String = {
-          val start = types.start(typeIndex)
-          val length = types.length(typeIndex)
-          types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
-        }
+        val id: Long =
+          if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
+          else -1
+        val tipe: String =
+          if (types.noNulls || !types.isNull(typeIndex)) {
+            val start = types.start(typeIndex)
+            val length = types.length(typeIndex)
+            types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
+          }
+          else null
+
         val pair = (id, tipe)
 
         if (pairs.contains(pair)) println(id, tipe)

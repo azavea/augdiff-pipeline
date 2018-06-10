@@ -47,6 +47,7 @@ object OrcBackend {
       val memberssTypes = memberssChild.fields(0).asInstanceOf[vector.BytesColumnVector]
       val memberssRefs = memberssChild.fields(1).asInstanceOf[vector.LongColumnVector]
       val memberssRoles = memberssChild.fields(2).asInstanceOf[vector.BytesColumnVector]
+      val changesets = batch.cols(7).asInstanceOf[vector.LongColumnVector]
 
       Range(0, batch.size).foreach({ i =>
 
@@ -54,7 +55,7 @@ object OrcBackend {
         val idIndex = if (ids.isRepeating) 0; else i
         val id: Long =
           if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
-          else -1
+          else Long.MinValue
 
         // type
         val typeIndex = if (types.isRepeating) 0; else i
@@ -116,6 +117,13 @@ object OrcBackend {
             })
           }
           else Array.empty[Long]
+
+        // changeset
+        val changesetIndex = if (changesets.isRepeating) 0; else i
+        val changeset =
+          if (changesets.noNulls || !changesets.isNull(changesetIndex))
+            changesets.vector(changesetIndex)
+          else Long.MinValue
 
         // members
         val membersIndex = if (memberss.isRepeating) 0; else i

@@ -53,8 +53,8 @@ object OrcBackend {
 
         if (pairs.contains(pair)) println(id, tipe)
       })
-      rows.close
     }
+    rows.close
   }
 
   def load(

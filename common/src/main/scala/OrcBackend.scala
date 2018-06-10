@@ -51,7 +51,6 @@ object OrcBackend {
 
         val pair = (id, tipe)
 
-        if (pairs.contains(pair)) println(id, tipe)
       })
     }
     rows.close

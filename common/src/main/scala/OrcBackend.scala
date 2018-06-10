@@ -49,6 +49,10 @@ object OrcBackend {
       val memberssRoles = memberssChild.fields(2).asInstanceOf[vector.BytesColumnVector]
       val changesets = batch.cols(7).asInstanceOf[vector.LongColumnVector]
       val timestamps = batch.cols(8).asInstanceOf[vector.TimestampColumnVector]
+      val uids = batch.cols(9).asInstanceOf[vector.LongColumnVector]
+      val users = batch.cols(10).asInstanceOf[vector.BytesColumnVector]
+      val versions = batch.cols(11).asInstanceOf[vector.LongColumnVector]
+      val visibles = batch.cols(12).asInstanceOf[vector.LongColumnVector]
 
       Range(0, batch.size).foreach({ i =>
 
@@ -67,6 +71,9 @@ object OrcBackend {
             types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
           }
           else null
+
+        // pair
+        val pair = (id, tipe)
 
         // tags
         val tagsIndex = if (tagss.isRepeating) 0; else i
@@ -159,17 +166,46 @@ object OrcBackend {
             new java.sql.Timestamp(timestamps.time(timestampIndex))
           else null
 
-        val pair = (id, tipe)
+        // uid
+        val uidIndex = if (uids.isRepeating) 0; else i
+        val uid =
+          if (uids.noNulls || !uids.isNull(uidIndex)) uids.vector(uidIndex)
+          else Long.MinValue
+
+        // user
+        val userIndex = if (users.isRepeating) 0; else i
+        val user: String =
+          if (users.noNulls || !users.isNull(userIndex)) {
+            val start = users.start(userIndex)
+            val length = users.length(userIndex)
+            users.vector(userIndex).drop(start).take(length).map(_.toChar).mkString
+          }
+          else null
+
+        // version
+        val versionIndex = if (versions.isRepeating) 0 ; else i
+        val version =
+          if (versions.noNulls || !versions.isNull(versionIndex)) versions.vector(versionIndex)
+          else Long.MinValue
+
+        // visible
+        val visibleIndex = if (visibles.isRepeating) 0; else i
+        val visible: Boolean =
+          if (visibles.noNulls || !visibles.isNull(visibleIndex)) {
+            if (visibles.vector(visibleIndex) == 0) false; else true
+          }
+          else false
+
         if (pairs.contains(pair)) {
           if (tipe == "node") {
-            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp))
+            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible))
           }
           else if (tipe == "way") {
-            println(Row(id, tipe, tags, null, null, nds, members, changeset, timestamp))
+            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible))
             println(nds.toList)
           }
           else if (tipe == "relation") {
-            println(Row(id, tipe, tags, null, null, nds, members, changeset, timestamp))
+            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible))
             println(members.toList)
           }
         }

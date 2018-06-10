@@ -27,8 +27,9 @@ object OrcBackend {
     conf: Configuration
   ): Unit = {
     val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
-    val rows = reader.rows(reader.options)
-    val batch = reader.getSchema.createRowBatch
+    val schema = reader.getSchema
+    val rows = reader.rows(reader.options.schema(schema))
+    val batch = schema.createRowBatch
 
     // https://orc.apache.org/docs/core-java.html
     while(rows.nextBatch(batch)) {

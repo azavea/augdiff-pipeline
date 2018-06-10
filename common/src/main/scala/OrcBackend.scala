@@ -25,11 +25,12 @@ object OrcBackend {
     path: Path,
     pairs: Set[(Long, String)],
     conf: Configuration
-  ): Unit = {
+  ): Array[Row] = {
     val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
     val schema = reader.getSchema
     val rows = reader.rows(reader.options.schema(schema))
     val batch = schema.createRowBatch
+    val ab = mutable.ArrayBuffer.empty[Row]
 
     // https://orc.apache.org/docs/core-java.html
     while(rows.nextBatch(batch)) {
@@ -72,7 +73,8 @@ object OrcBackend {
           }
           else null
 
-        // pair
+        // p, pair
+        val p = Common.partitionNumberFn(id, tipe)
         val pair = (id, tipe)
 
         // tags
@@ -115,16 +117,16 @@ object OrcBackend {
 
         // nds
         val ndsIndex = if (ndss.isRepeating) 0; else i
-        val nds: Array[Long] =
+        val nds: Array[Row] =
           if (ndss.noNulls || !ndss.isNull(ndsIndex)) {
             val offset = ndss.offsets(ndsIndex).toInt
             val length = ndss.lengths(ndsIndex).toInt
             Range(offset, offset+length).toArray.map({ j =>
               val index = if (ndssField.isRepeating) 0; else j
-              ndssField.vector(index)
+              Row(ndssField.vector(index))
             })
           }
-          else Array.empty[Long]
+          else Array.empty[Row]
 
         // changeset
         val changesetIndex = if (changesets.isRepeating) 0; else i
@@ -197,29 +199,21 @@ object OrcBackend {
           else false
 
         if (pairs.contains(pair)) {
-          if (tipe == "node") {
-            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible))
-          }
-          else if (tipe == "way") {
-            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible))
-            println(nds.toList)
-          }
-          else if (tipe == "relation") {
-            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible))
-            println(members.toList)
-          }
+          val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+          ab.append(row)
         }
       })
     }
+
     rows.close
+    ab.toArray
   }
 
   def load(
     spark: SparkSession,
-    tableName: String,
     externalLocation: String,
     keyedTriples: Map[Long, Set[(Long, Long, String)]]
-  ): DataFrame = {
+  ): Array[Row] = {
     val conf = spark.sparkContext.hadoopConfiguration
     val fs = FileSystem.get(conf)
     val partitions: Set[Long] = keyedTriples.keys.toSet
@@ -237,11 +231,7 @@ object OrcBackend {
       }
     }
 
-    paths.toArray.foreach({ path =>
-      loadFile(path, pairs, conf)
-    })
-
-    spark.table("osm").select(Common.osmColumns: _*)
+    paths.toArray.par.flatMap({ path => loadFile(path, pairs, conf) }).toArray
   }
 
   def save(

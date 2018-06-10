@@ -43,14 +43,6 @@ object AugmentedDiff {
     edges: Set[ComputeIndexLocal.Edge],
     externalLocation: String
   ): Array[Row] = {
-    // Convert (id, type) pairs to packed representations (both values
-    // stored in one long).
-    val rowLongs = rows1.map({ row =>
-      val id = row.getLong(1)
-      val tipe = row.getString(2)
-      Common.pairToLongFn(id, tipe)
-    }).toSet
-
     // (partition, id, type) triples from the update rows
     val triples1 = // from updates
       rows1.map({ row =>
@@ -74,42 +66,11 @@ object AugmentedDiff {
         }).toSet
 
     val triples = triples1 ++ triples2 // triples from all of the rows
-    val desired = triples.map({ triple => (triple._2, triple._3) }) // all desired (id, type) pairs
     val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
 
-    logger.info(s"● Reading ${keyedTriples.size} partitions in groups of ${Common.pfLimit}")
-
-    val osm = OrcBackend.load(spark, "osm", externalLocation, keyedTriples)
-
-    // The gymnastics involving keyedTriples are to allow all desired
-    // (id, type) pairs to be read out of storage using partition
-    // pruning (the first item of each triple is a partition number).
-    // The use of `isin` enables predicate pushdown.
-    val dfs: Iterator[DataFrame] = keyedTriples.grouped(Common.pfLimit).map({ triples =>
-      logger.info("● Reading group")
-      val ps: Array[Long] = triples.map(_._1).toArray
-      val ids: Array[Long] = triples.map(_._2).reduce(_ ++ _).map(_._2).toArray
-      val retval: DataFrame = osm.filter(col("p").isin(ps: _*))
-      if (ids.length < Common.idLimit)
-        retval.filter(col("id").isin(ids: _*))
-      else
-        retval
-    })
-
-    // The set of dependency rows from storage
-    val _rows2 = dfs
-      .map({ df =>
-        df.select(Common.osmColumns: _*)
-          .collect
-          .filter({ row =>
-            val id = row.getLong(1)     /* id */
-            val tipe = row.getString(2) /* type */
-            val pair = (id, tipe)
-            desired.contains(pair) })
-      })
-    val rows2 =
-      if (_rows2.isEmpty) Array.empty[Row]
-      else _rows2.reduce(_ ++ _)
+    logger.info(s"● Reading OSM ...")
+    val rows2 = OrcBackend.load(spark, externalLocation, keyedTriples)
+    logger.info(s"● Done reading OSM.")
 
     (rows1 ++ rows2).distinct // rows from update ++ rows from storage
   }

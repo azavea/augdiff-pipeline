@@ -38,11 +38,15 @@ object OrcBackend {
       val tagss = batch.cols(2).asInstanceOf[vector.MapColumnVector]
       val tagKeys = tagss.keys.asInstanceOf[vector.BytesColumnVector]
       val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
+      val lats = batch.cols(3).asInstanceOf[vector.DecimalColumnVector]
+      val lons = batch.cols(4).asInstanceOf[vector.DecimalColumnVector]
 
       Range(0, batch.size).foreach({ i =>
         val idIndex = if (ids.isRepeating) 0; else i
         val typeIndex = if (types.isRepeating) 0; else i
         val tagsIndex = if (tagss.isRepeating) 0; else i
+        val latIndex = if (lats.isRepeating) 0; else i
+        val lonIndex = if (lons.isRepeating) 0; else i
 
         val id: Long =
           if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
@@ -67,11 +71,19 @@ object OrcBackend {
             }).toMap
           }
           else null
+        lazy val lat: java.math.BigDecimal =
+          if (lats.noNulls || !types.isNull(latIndex))
+            lats.vector(latIndex).getHiveDecimal.bigDecimalValue
+          else null
+        lazy val lon: java.math.BigDecimal =
+          if (lons.noNulls || !types.isNull(lonIndex))
+            lons.vector(lonIndex).getHiveDecimal.bigDecimalValue
+          else null
 
         val pair = (id, tipe)
         if (pairs.contains(pair)) {
           if (tipe == "node") {
-            println(id, tipe, tags)
+            println(Row(id, tipe, tags, lat, lon))
           }
         }
       })

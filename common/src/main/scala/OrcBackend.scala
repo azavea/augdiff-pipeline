@@ -48,6 +48,7 @@ object OrcBackend {
       val memberssRefs = memberssChild.fields(1).asInstanceOf[vector.LongColumnVector]
       val memberssRoles = memberssChild.fields(2).asInstanceOf[vector.BytesColumnVector]
       val changesets = batch.cols(7).asInstanceOf[vector.LongColumnVector]
+      val timestamps = batch.cols(8).asInstanceOf[vector.TimestampColumnVector]
 
       Range(0, batch.size).foreach({ i =>
 
@@ -151,17 +152,24 @@ object OrcBackend {
           }
           else Array.empty[Row]
 
+        // timestamp
+        val timestampIndex = if (timestamps.isRepeating) 0; else i
+        val timestamp =
+          if (timestamps.noNulls || !timestamps.isNull(timestampIndex))
+            new java.sql.Timestamp(timestamps.time(timestampIndex))
+          else null
+
         val pair = (id, tipe)
         if (pairs.contains(pair)) {
           if (tipe == "node") {
-            println(Row(id, tipe, tags, lat, lon, nds, members))
+            println(Row(id, tipe, tags, lat, lon, nds, members, changeset, timestamp))
           }
           else if (tipe == "way") {
-            println(Row(id, tipe, tags, null, null, nds, members))
+            println(Row(id, tipe, tags, null, null, nds, members, changeset, timestamp))
             println(nds.toList)
           }
           else if (tipe == "relation") {
-            println(Row(id, tipe, tags, null, null, nds, members))
+            println(Row(id, tipe, tags, null, null, nds, members, changeset, timestamp))
             println(members.toList)
           }
         }

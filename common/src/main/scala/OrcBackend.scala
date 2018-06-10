@@ -34,10 +34,16 @@ object OrcBackend {
     // https://orc.apache.org/docs/core-java.html
     while(rows.nextBatch(batch)) {
       val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // XXX p column dropped (due to partitioned write?)
-      val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector] // XXX p column dropped (due to partitioned write?)
+      val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector]
+      val tagss = batch.cols(2).asInstanceOf[vector.MapColumnVector]
+      val tagKeys = tagss.keys.asInstanceOf[vector.BytesColumnVector]
+      val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
+
       Range(0, batch.size).foreach({ i =>
         val idIndex = if (ids.isRepeating) 0; else i
         val typeIndex = if (types.isRepeating) 0; else i
+        val tagsIndex = if (tagss.isRepeating) 0; else i
+
         val id: Long =
           if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
           else -1
@@ -48,9 +54,26 @@ object OrcBackend {
             types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
           }
           else null
+        val tags: Map[String, String] =
+          if (tagss.noNulls || !types.isNull(tagsIndex)) {
+            val offset = tagss.offsets(tagsIndex).toInt
+            val length = tagss.lengths(tagsIndex).toInt
+            Range(offset, offset + length).map({ j =>
+              val keyIndex = if (tagKeys.isRepeating) 0; else j
+              val valueIndex = if (tagValues.isRepeating) 0; else j
+              val key: String = tagKeys.vector(keyIndex).drop(tagKeys.start(keyIndex)).take(tagKeys.length(keyIndex)).map(_.toChar).mkString
+              val value: String = tagValues.vector(valueIndex).drop(tagValues.start(valueIndex)).take(tagValues.length(valueIndex)).map(_.toChar).mkString
+              key -> value
+            }).toMap
+          }
+          else null
 
         val pair = (id, tipe)
-
+        if (pairs.contains(pair)) {
+          if (tipe == "node") {
+            println(id, tipe, tags)
+          }
+        }
       })
     }
     rows.close

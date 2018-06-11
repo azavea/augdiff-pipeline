@@ -106,6 +106,7 @@ object ChangeAugmenter {
 
 class ChangeAugmenter(
   conf: Configuration,
+  rows_from_memory: mutable.ArrayBuffer[Row],
   uri: String, props: java.util.Properties,
   jsonfile: String,
   externalLocation: String
@@ -138,12 +139,18 @@ class ChangeAugmenter(
   def complete(): Unit = {
     logger.info("complete")
 
-    val diff = osm.toArray
+    val rows_from_update = osm.toArray
     // val osmDf = spark.createDataFrame(
-    //   spark.sparkContext.parallelize(diff, 1),
+    //   spark.sparkContext.parallelize(rows_from_update, 1),
     //   StructType(Common.osmSchema))
-    val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
-    val augmentedDiff = AugmentedDiff.augment(conf, diff, allEdges, externalLocation)
+    val (newEdges, allEdges) = ComputeIndexLocal(rows_from_update, uri, props)
+    val rows_from_everywhere =
+      AugmentedDiff.augment(
+        conf,
+        rows_from_update,
+        rows_from_memory.toArray,
+        allEdges,
+        externalLocation)
     val fos =
       if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
         val path = new Path(jsonfile)
@@ -152,7 +159,9 @@ class ChangeAugmenter(
       }
       else new FileOutputStream(new File(jsonfile))
 
-    RowsToJson(fos, diff, augmentedDiff)
+    rows_from_memory ++= rows_from_update // update in-memory row list
+
+    RowsToJson(fos, rows_from_update, rows_from_everywhere)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
     // OrcBackend.save(osmDf, "osm", externalLocation, "append")
   }

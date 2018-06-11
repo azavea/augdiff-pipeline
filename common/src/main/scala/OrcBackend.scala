@@ -230,10 +230,10 @@ object OrcBackend {
   def load(
     conf: Configuration,
     paths: Array[Path],
-    keyedTriples: Map[Long, Set[(Long, Long, String)]]
+    keyedTriples: Map[Long, Set[(Long, Long, String)]],
+    pairs: Set[(Long, String)]
   ): Array[Row] = {
     val partitions: Set[Long] = keyedTriples.keys.toSet
-    val pairs: Set[(Long, String)] = keyedTriples.values.flatMap({ s => s.map({ t => (t._2, t._3) }) }).toSet
     val re = raw"p=(\d+)".r.unanchored
     val paths2 = paths
       .filter({ path =>

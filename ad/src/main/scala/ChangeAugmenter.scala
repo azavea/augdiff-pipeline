@@ -6,6 +6,7 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 
 import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.conf.Configuration
 
 import org.openstreetmap.osmosis.core.container.v0_6._
 import org.openstreetmap.osmosis.core.domain.v0_6._
@@ -104,7 +105,7 @@ object ChangeAugmenter {
 }
 
 class ChangeAugmenter(
-  spark: SparkSession,
+  conf: Configuration,
   uri: String, props: java.util.Properties,
   jsonfile: String,
   externalLocation: String
@@ -138,15 +139,14 @@ class ChangeAugmenter(
     logger.info("complete")
 
     val diff = osm.toArray
-    val osmDf = spark.createDataFrame(
-      spark.sparkContext.parallelize(diff, 1),
-      StructType(Common.osmSchema))
+    // val osmDf = spark.createDataFrame(
+    //   spark.sparkContext.parallelize(diff, 1),
+    //   StructType(Common.osmSchema))
     val (newEdges, allEdges) = ComputeIndexLocal(diff, uri, props)
-    val augmentedDiff = AugmentedDiff.augment(spark, diff, allEdges, externalLocation)
+    val augmentedDiff = AugmentedDiff.augment(conf, diff, allEdges, externalLocation)
     val fos =
       if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
         val path = new Path(jsonfile)
-        val conf = spark.sparkContext.hadoopConfiguration
         val fs = FileSystem.get(new URI(jsonfile), conf)
         fs.create(path)
       }
@@ -154,7 +154,7 @@ class ChangeAugmenter(
 
     RowsToJson(fos, diff, augmentedDiff)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
-    OrcBackend.save(osmDf, "osm", externalLocation, "append")
+    // OrcBackend.save(osmDf, "osm", externalLocation, "append")
   }
 
   def close(): Unit = {}

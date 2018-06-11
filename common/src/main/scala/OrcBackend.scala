@@ -28,6 +28,7 @@ object OrcBackend {
   ): Unit = {
     val fs = FileSystem.get(conf)
 
+    logger.info(s"Getting list of ORC files from storage")
     paths.clear
 
     // https://stackoverflow.com/questions/11342400/how-to-list-all-files-in-a-directory-and-its-subdirectories-in-hadoop-hdfs
@@ -242,11 +243,11 @@ object OrcBackend {
         }
       })
 
-    logger.info(s"${keyedTriples.size} partitions, ${paths2.size} files")
+    logger.info(s"Loading ${keyedTriples.size} partitions from ${paths2.size} files")
 
     val rows = paths2.par.flatMap({ path => loadFile(path, pairs, conf) }).toArray
 
-    logger.info(s"${rows.size} rows from storage")
+    logger.info(s"Got ${rows.size} rows from storage")
 
     rows
   }

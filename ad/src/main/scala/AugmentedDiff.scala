@@ -9,6 +9,7 @@ import org.apache.spark.sql.functions._
 import org.apache.commons.io.FileUtils
 
 import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.conf.Configuration
 
 import org.openstreetmap.osmosis.xml.common.CompressionMethod
 import org.openstreetmap.osmosis.xml.v0_6.XmlChangeReader
@@ -32,6 +33,7 @@ object AugmentedDiff {
 
   // state
   val paths = mutable.ArrayBuffer.empty[Path]
+  val rows_from_memory = mutable.ArrayBuffer.empty[Row]
 
   // Given a set of update rows (`rows_from_memory`) and a partial set
   // of dependency arrows (`edges` [edge.a is an entity, edge.b is a
@@ -41,7 +43,7 @@ object AugmentedDiff {
   // The set `edges` is passed-in because it has already been computed
   // as part of the index-updating process.
   def augment(
-    spark: SparkSession,
+    conf: Configuration,
     rows_from_memory: Array[Row],
     edges: Set[ComputeIndexLocal.Edge],
     externalLocation: String
@@ -70,32 +72,25 @@ object AugmentedDiff {
 
     val triples = triples1 ++ triples2 // triples from all of the rows
     val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
-
-    logger.info(s"Getting file list from storage")
-    val conf = spark.sparkContext.hadoopConfiguration
-    OrcBackend.listFiles(conf, paths, externalLocation)
-    logger.info(s"Done done getting file list from storage")
-
-    logger.info(s"Reading OSM from storage")
     val rows_from_storage = OrcBackend.load(conf, paths.toArray, keyedTriples)
-    logger.info(s"Done reading OSM from storage")
 
     (rows_from_memory ++ rows_from_storage).distinct
   }
 
   def osc2json(
+    conf: Configuration,
     oscfile: String, jsonfile: String,
     uri: String, props: java.util.Properties,
-    externalLocation: String,
-    spark: SparkSession
+    externalLocation: String
   ): Unit = {
+    logger.info(s"$oscfile -> $jsonfile")
+
     var i: Int = 1; while (i <= (1<<8)) {
       // File
       val file: File =
         try {
           if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
             val path = new Path(oscfile)
-            val conf = spark.sparkContext.hadoopConfiguration
             val uri = new URI(oscfile)
             val fs = FileSystem.get(uri, conf)
             val tmp = File.createTempFile("abcdefg", ".osc")
@@ -131,7 +126,7 @@ object AugmentedDiff {
           if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
           else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
           else new XmlChangeReader(file, true, CompressionMethod.None)
-        val ca = new ChangeAugmenter(spark, uri, props, jsonfile, externalLocation)
+        val ca = new ChangeAugmenter(conf, uri, props, jsonfile, externalLocation)
 
         cr.setChangeSink(ca)
         try {
@@ -199,14 +194,16 @@ object AugmentedDiffApp extends CommandApp(
         case _ => throw new Exception("Oh no")
       }
 
+      val conf = spark.sparkContext.hadoopConfiguration
+      OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
+
       stream.foreach({ i =>
         val ccc = AugmentedDiff.numberToStr(i % 1000)
         val bbb = AugmentedDiff.numberToStr((i / 1000) % 1000)
         val aaa = AugmentedDiff.numberToStr((i / 1000000) % 1000)
         val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
-        AugmentedDiff.logger.info(s"$oscfile -> $jsonfile")
-        AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, external, spark)
+        AugmentedDiff.osc2json(conf, oscfile, jsonfile, uri, props, external)
       })
     })
   }

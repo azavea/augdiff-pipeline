@@ -30,8 +30,11 @@ object AugmentedDiff {
     logger
   }
 
-  // Given a set of update rows (`rows1`) and a partial set of
-  // dependency arrows (`edges` [edge.a is an entity, edge.b is a
+  // state
+  val paths = mutable.ArrayBuffer.empty[Path]
+
+  // Given a set of update rows (`rows_from_memory`) and a partial set
+  // of dependency arrows (`edges` [edge.a is an entity, edge.b is a
   // dependency of that entity]), compute the complete set of rows
   // needed to render the update.
   //
@@ -39,13 +42,13 @@ object AugmentedDiff {
   // as part of the index-updating process.
   def augment(
     spark: SparkSession,
-    rows1: Array[Row],
+    rows_from_memory: Array[Row],
     edges: Set[ComputeIndexLocal.Edge],
     externalLocation: String
   ): Array[Row] = {
     // (partition, id, type) triples from the update rows
     val triples1 = // from updates
-      rows1.map({ row =>
+      rows_from_memory.map({ row =>
         val id = row.getLong(1)
         val tipe = row.getString(2)
         val p = Common.partitionNumberFn(id, tipe)
@@ -68,11 +71,16 @@ object AugmentedDiff {
     val triples = triples1 ++ triples2 // triples from all of the rows
     val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
 
-    logger.info(s"● Reading OSM ...")
-    val rows2 = OrcBackend.load(spark, externalLocation, keyedTriples)
-    logger.info(s"● Done reading OSM.")
+    logger.info(s"Getting file list from storage")
+    val conf = spark.sparkContext.hadoopConfiguration
+    OrcBackend.listFiles(conf, paths, externalLocation)
+    logger.info(s"Done done getting file list from storage")
 
-    (rows1 ++ rows2).distinct // rows from update ++ rows from storage
+    logger.info(s"Reading OSM from storage")
+    val rows_from_storage = OrcBackend.load(conf, paths.toArray, keyedTriples)
+    logger.info(s"Done reading OSM from storage")
+
+    (rows_from_memory ++ rows_from_storage).distinct
   }
 
   def osc2json(

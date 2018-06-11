@@ -21,6 +21,23 @@ object OrcBackend {
     logger
   }
 
+  def listFiles(
+    conf: Configuration,
+    paths: mutable.ArrayBuffer[Path],
+    externalLocation: String
+  ): Unit = {
+    val fs = FileSystem.get(conf)
+
+    paths.clear
+
+    // https://stackoverflow.com/questions/11342400/how-to-list-all-files-in-a-directory-and-its-subdirectories-in-hadoop-hdfs
+    val iter = fs.listFiles(new Path(externalLocation), true)
+    while (iter.hasNext) {
+      val path = iter.next.getPath
+      if (path.toString.endsWith(".orc")) paths.append(path)
+    }
+  }
+
   def loadFile(
     path: Path,
     pairs: Set[(Long, String)],
@@ -210,28 +227,28 @@ object OrcBackend {
   }
 
   def load(
-    spark: SparkSession,
-    externalLocation: String,
+    conf: Configuration,
+    paths: Array[Path],
     keyedTriples: Map[Long, Set[(Long, Long, String)]]
   ): Array[Row] = {
-    val conf = spark.sparkContext.hadoopConfiguration
-    val fs = FileSystem.get(conf)
     val partitions: Set[Long] = keyedTriples.keys.toSet
     val pairs: Set[(Long, String)] = keyedTriples.values.flatMap({ s => s.map({ t => (t._2, t._3) }) }).toSet
     val re = raw"p=(\d+)".r.unanchored
-    val paths = mutable.ArrayBuffer.empty[Path]
+    val paths2 = paths
+      .filter({ path =>
+        path.toString match {
+          case re(partition) => if (partitions.contains(partition.toLong)) true; else false
+          case _ => false
+        }
+      })
 
-    // https://stackoverflow.com/questions/11342400/how-to-list-all-files-in-a-directory-and-its-subdirectories-in-hadoop-hdfs
-    val iter = fs.listFiles(new Path(externalLocation), true)
-    while (iter.hasNext) {
-      val path = iter.next.getPath
-      path.toString match {
-        case re(partition) => if (partitions.contains(partition.toLong)) paths.append(path)
-        case _ =>
-      }
-    }
+    logger.info(s"${keyedTriples.size} partitions, ${paths2.size} files")
 
-    paths.toArray.par.flatMap({ path => loadFile(path, pairs, conf) }).toArray
+    val rows = paths2.par.flatMap({ path => loadFile(path, pairs, conf) }).toArray
+
+    logger.info(s"${rows.size} rows from storage")
+
+    rows
   }
 
   def save(

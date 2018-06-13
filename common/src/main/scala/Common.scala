@@ -75,27 +75,6 @@ object Common {
 
   val getInstant = udf({ (ts: java.sql.Timestamp) => ts.getTime })
 
-  private val tagKvDelim = "𓁧"
-  private val tagPairDelim = "𓁟"
-
-  def tagsToStringFn(tags: Map[String, String]): String = {
-    tags
-      .map({ kv => kv._1 + tagKvDelim + kv._2 })
-      .foldLeft("")({ case (accum: String, kv: String) => kv + tagPairDelim + accum })
-  }
-
-  def stringToTagsFn(str: String): Map[String, String] = {
-    str
-      .split(tagPairDelim)
-      .flatMap({ kv => kv.split(tagKvDelim) match {
-        case Array(k: String, v: String) => Some(k -> v)
-        case _ => None
-      } })
-      .toMap
-  }
-
-  def tagToStringUdf = udf({ (tags: Map[String, String]) => tagsToStringFn(tags) })
-
   val ndsSchema = ArrayType(StructType(List(StructField("ref", LongType, true))))
   val membersSchema = ArrayType(StructType(List(
     StructField("type", StringType, true),
@@ -121,21 +100,6 @@ object Common {
     col("id"),        /* 1 */
     col("type"),      /* 2 */
     col("tags"),      /* 3 */
-    col("lat"),       /* 4 */
-    col("lon"),       /* 5 */
-    col("nds"),       /* 6 */
-    col("members"),   /* 7 */
-    col("changeset"), /* 8 */
-    col("timestamp"), /* 9 */
-    col("uid"),       /* 10 */
-    col("user"),      /* 11 */
-    col("version"),   /* 12 */
-    col("visible"))   /* 13 */
-  val osmColumns2: List[Column] = List(
-    col("p"),         /* 0 */
-    col("id"),        /* 1 */
-    col("type"),      /* 2 */
-    col("tagsStr"),   /* 3 */
     col("lat"),       /* 4 */
     col("lon"),       /* 5 */
     col("nds"),       /* 6 */

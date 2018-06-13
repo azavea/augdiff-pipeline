@@ -9,6 +9,7 @@ import org.apache.spark.sql.functions._
 import org.apache.commons.io.FileUtils
 
 import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.hadoop.conf.Configuration
 
 import org.openstreetmap.osmosis.xml.common.CompressionMethod
 import org.openstreetmap.osmosis.xml.v0_6.XmlChangeReader
@@ -30,31 +31,33 @@ object AugmentedDiff {
     logger
   }
 
-  // Given a set of update rows (`rows1`) and a partial set of
-  // dependency arrows (`edges` [edge.a is an entity, edge.b is a
-  // dependency of that entity]), compute the complete set of rows
-  // needed to render the update.
+  // state
+  val paths = mutable.ArrayBuffer.empty[Path]
+  val rows_from_memory = mutable.ArrayBuffer.empty[Row]
+
+  // Given a set of update rows (`rows_from_update`), a set of rows
+  // from memory that haven't been flushed to storage yet
+  // (`rows_from_memory`), and a set of dependency arrows (`edges`
+  // [edge.a is an entity, edge.b is a dependency of that entity]),
+  // compute the complete set of rows needed to render the update.
   //
   // The set `edges` is passed-in because it has already been computed
   // as part of the index-updating process.
   def augment(
-    spark: SparkSession,
-    rows1: Array[Row],
-    edges: Set[ComputeIndexLocal.Edge]
+    conf: Configuration,
+    from_update: Array[Row],
+    from_memory: Array[Row],
+    edges: Set[ComputeIndexLocal.Edge],
+    externalLocation: String
   ): Array[Row] = {
-    val osm = spark.table("osm").select(Common.osmColumns: _*)
 
-    // Convert (id, type) pairs to packed representations (both values
-    // stored in one long).
-    val rowLongs = rows1.map({ row =>
-      val id = row.getLong(1)
-      val tipe = row.getString(2)
-      Common.pairToLongFn(id, tipe)
-    }).toSet
-
-    // (partition, id, type) triples from the update rows
-    val triples1 = // from updates
-      rows1.map({ row =>
+    // (partition, id, type) triples from the update rows.
+    //
+    // This may look strange because the update rows are already in
+    // hand, but these do need to be loaded from storage in the case
+    // where something has been *modified* rather than just added.
+    val triples_from_updates =
+      from_update.map({ row =>
         val id = row.getLong(1)
         val tipe = row.getString(2)
         val p = Common.partitionNumberFn(id, tipe)
@@ -62,7 +65,7 @@ object AugmentedDiff {
       }).toSet
 
     // (partition, id, type) triples form the dependency rows
-    val triples2 = // from dependencies
+    val triples_from_deps =
       edges
         .flatMap({ edge =>
           val aId = Common.longToIdFn(edge.a)
@@ -74,57 +77,34 @@ object AugmentedDiff {
           List((ap, aId, aType), (bp, bId, bType))
         }).toSet
 
-    val triples = triples1 ++ triples2 // triples from all of the rows
-    val desired = triples.map({ triple => (triple._2, triple._3) }) // all desired (id, type) pairs
+    val triples = triples_from_updates ++ triples_from_deps
     val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
-
-    logger.info(s"● Reading ${keyedTriples.size} partitions in groups of ${Common.pfLimit}")
-
-    // The gymnastics involving keyedTriples are to allow all desired
-    // (id, type) pairs to be read out of storage using partition
-    // pruning (the first item of each triple is a partition number).
-    // The use of `isin` enables predicate pushdown.
-    val dfs: Iterator[DataFrame] = keyedTriples.grouped(Common.pfLimit).map({ triples =>
-      logger.info("● Reading group")
-      val ps: Array[Long] = triples.map(_._1).toArray
-      val ids: Array[Long] = triples.map(_._2).reduce(_ ++ _).map(_._2).toArray
-      val retval: DataFrame = osm.filter(col("p").isin(ps: _*))
-      if (ids.length < Common.idLimit)
-        retval.filter(col("id").isin(ids: _*))
-      else
-        retval
+    val pairs: Set[(Long, String)] = keyedTriples.values.flatMap({ s => s.map({ t => (t._2, t._3) }) }).toSet
+    val from_memory2 = from_memory.filter({ row => // filter out uninteresting in-memory rows
+      val id = row.getLong(1)
+      val tipe = row.getString(2)
+      val pair = (id, tipe)
+      pairs.contains(pair)
     })
+    val from_storage = OrcBackend.load(conf, paths.toArray, keyedTriples, pairs)
 
-    // The set of dependency rows from storage
-    val _rows2 = dfs
-      .map({ df =>
-        df.select(Common.osmColumns: _*)
-          .collect
-          .filter({ row =>
-            val id = row.getLong(1)     /* id */
-            val tipe = row.getString(2) /* type */
-            val pair = (id, tipe)
-            desired.contains(pair) })
-      })
-    val rows2 =
-      if (_rows2.isEmpty) Array.empty[Row]
-      else _rows2.reduce(_ ++ _)
-
-    (rows1 ++ rows2).distinct // rows from update ++ rows from storage
+    (from_update ++ from_memory2 ++ from_storage).distinct
   }
 
   def osc2json(
+    conf: Configuration,
     oscfile: String, jsonfile: String,
     uri: String, props: java.util.Properties,
-    spark: SparkSession
+    externalLocation: String
   ): Unit = {
+    logger.info(s"$oscfile -> $jsonfile")
+
     var i: Int = 1; while (i <= (1<<8)) {
       // File
       val file: File =
         try {
           if (oscfile.startsWith("hdfs:") || oscfile.startsWith("file:") || oscfile.startsWith("s3a:")) {
             val path = new Path(oscfile)
-            val conf = spark.sparkContext.hadoopConfiguration
             val uri = new URI(oscfile)
             val fs = FileSystem.get(uri, conf)
             val tmp = File.createTempFile("abcdefg", ".osc")
@@ -160,7 +140,7 @@ object AugmentedDiff {
           if (oscfile.endsWith(".osc.bz2")) new XmlChangeReader(file, true, CompressionMethod.BZip2)
           else if (oscfile.endsWith(".osc.gz")) new XmlChangeReader(file, true, CompressionMethod.GZip)
           else new XmlChangeReader(file, true, CompressionMethod.None)
-        val ca = new ChangeAugmenter(spark, uri, props, jsonfile)
+        val ca = new ChangeAugmenter(conf, rows_from_memory, uri, props, jsonfile, externalLocation)
 
         cr.setChangeSink(ca)
         try {
@@ -207,9 +187,11 @@ object AugmentedDiffApp extends CommandApp(
       Opts.option[String]("postgresPassword", help = "PostgreSQL password").withDefault("hive")
     val postgresDb =
       Opts.option[String]("postgresDb", help = "PostgreSQL database").withDefault("osm")
+    val external =
+      Opts.option[String]("external", help = "External location of OSM table")
 
-    (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb).mapN({
-      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb) =>
+    (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
+      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -226,14 +208,16 @@ object AugmentedDiffApp extends CommandApp(
         case _ => throw new Exception("Oh no")
       }
 
+      val conf = spark.sparkContext.hadoopConfiguration
+      OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
+
       stream.foreach({ i =>
         val ccc = AugmentedDiff.numberToStr(i % 1000)
         val bbb = AugmentedDiff.numberToStr((i / 1000) % 1000)
         val aaa = AugmentedDiff.numberToStr((i / 1000000) % 1000)
         val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
-        AugmentedDiff.logger.info(s"$oscfile -> $jsonfile")
-        AugmentedDiff.osc2json(oscfile, jsonfile, uri, props, spark)
+        AugmentedDiff.osc2json(conf, oscfile, jsonfile, uri, props, external)
       })
     })
   }

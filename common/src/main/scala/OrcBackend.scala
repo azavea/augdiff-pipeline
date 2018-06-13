@@ -4,8 +4,9 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.orc.storage.ql.io.sarg._
 
 import org.apache.orc
 import org.apache.orc.storage.ql.exec.vector
@@ -28,7 +29,7 @@ object OrcBackend {
   ): Unit = {
     val fs = FileSystem.get(conf)
 
-    logger.info(s"Getting list of ORC files from storage")
+    logger.info(s"Getting list of ORC files")
     paths.clear
 
     // https://stackoverflow.com/questions/11342400/how-to-list-all-files-in-a-directory-and-its-subdirectories-in-hadoop-hdfs
@@ -41,12 +42,13 @@ object OrcBackend {
 
   def loadFile(
     path: Path,
+    sarg: SearchArgument,
     pairs: Set[(Long, String)],
     conf: Configuration
   ): Array[Row] = {
     val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
     val schema = reader.getSchema
-    val rows = reader.rows(reader.options.schema(schema))
+    val rows = reader.rows(reader.options.schema(schema).searchArgument(sarg, Array(null, "id")))
     val batch = schema.createRowBatch
     val ab = mutable.ArrayBuffer.empty[Row]
 
@@ -243,9 +245,19 @@ object OrcBackend {
         }
       })
 
-    logger.info(s"Loading ${keyedTriples.size} partitions from ${paths2.size} files")
+    logger.info(s"Building SearchArgument")
+    val sarg: SearchArgument = {
+      val longs = pairs.map({ pair => new java.lang.Long(pair._1) }).toArray
+      SearchArgumentFactory
+        .newBuilder
+        .startOr
+        .in("id", PredicateLeaf.Type.LONG, longs : _*)
+        .end
+        .build
+    }
 
-    val rows = paths2.par.flatMap({ path => loadFile(path, pairs, conf) }).toArray
+    logger.info(s"Loading ${keyedTriples.size} partitions from ${paths2.size} files")
+    val rows = paths2.par.flatMap({ path => loadFile(path, sarg, pairs, conf) }).toArray
 
     logger.info(s"Got ${rows.size} rows from storage")
 

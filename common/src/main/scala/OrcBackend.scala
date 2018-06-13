@@ -56,9 +56,7 @@ object OrcBackend {
     while(rows.nextBatch(batch)) {
       val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // id at 0 because p column dropped due to partitioned write
       val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector]
-      val tagss = batch.cols(2).asInstanceOf[vector.MapColumnVector]
-      val tagKeys = tagss.keys.asInstanceOf[vector.BytesColumnVector]
-      val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
+      val tagss = batch.cols(2).asInstanceOf[vector.BytesColumnVector]
       val lats = batch.cols(3).asInstanceOf[vector.DecimalColumnVector]
       val lons = batch.cols(4).asInstanceOf[vector.DecimalColumnVector]
       val ndss = batch.cols(5).asInstanceOf[vector.ListColumnVector]
@@ -100,24 +98,11 @@ object OrcBackend {
         // tags
         val tagsIndex = if (tagss.isRepeating) 0; else i
         val tags: Map[String, String] =
-          if ((tagss.noNulls || !tagss.isNull(tagsIndex)) && false) { // XXX
-            val offset = tagss.offsets(tagsIndex).toInt
-            val length = tagss.lengths(tagsIndex).toInt
-            Range(offset, offset+length).map({ j =>
-              val keyIndex = if (tagKeys.isRepeating) 0; else j
-              val valueIndex = if (tagValues.isRepeating) 0; else j
-              val key: String = tagKeys
-                .vector(keyIndex)
-                .drop(tagKeys.start(keyIndex))
-                .take(tagKeys.length(keyIndex))
-                .map(_.toChar).mkString
-              val value: String = tagValues
-                .vector(valueIndex)
-                .drop(tagValues.start(valueIndex))
-                .take(tagValues.length(valueIndex))
-                .map(_.toChar).mkString
-              key -> value
-            }).toMap
+          if (tagss.noNulls || !tagss.isNull(tagsIndex)) {
+            val start = tagss.start(tagsIndex)
+            val length = tagss.length(tagsIndex)
+            val str = tagss.vector(tagsIndex).drop(start).take(length).map(_.toChar).mkString
+            Common.stringToTagsFn(str)
           }
           else Map.empty[String, String]
 
@@ -279,6 +264,8 @@ object OrcBackend {
 
     logger.info(s"Writing OSM as ORC files")
     df
+      .withColumn("tagsStr", Common.tagToStringUdf(col("tags")))
+      .select(Common.osmColumns2: _*)
       .repartition(col("p"))
       .sortWithinPartitions(col("id"), col("type"))
       .write

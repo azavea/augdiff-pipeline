@@ -100,7 +100,7 @@ object OrcBackend {
         // tags
         val tagsIndex = if (tagss.isRepeating) 0; else i
         val tags: Map[String, String] =
-          if (tagss.noNulls || !tagss.isNull(tagsIndex)) {
+          if ((tagss.noNulls || !tagss.isNull(tagsIndex)) && false) { // XXX
             val offset = tagss.offsets(tagsIndex).toInt
             val length = tagss.lengths(tagsIndex).toInt
             Range(offset, offset+length).map({ j =>
@@ -119,26 +119,26 @@ object OrcBackend {
               key -> value
             }).toMap
           }
-          else null
+          else Map.empty[String, String]
 
         // lat
         val latIndex = if (lats.isRepeating) 0; else i
         val lat: java.math.BigDecimal =
-          if (lats.noNulls || !lats.isNull(latIndex))
+          if ((lats.noNulls || !lats.isNull(latIndex)) && (tipe == "node"))
             lats.vector(latIndex).getHiveDecimal.bigDecimalValue
           else null
 
         // lon
         val lonIndex = if (lons.isRepeating) 0; else i
         val lon: java.math.BigDecimal =
-          if (lons.noNulls || !lons.isNull(lonIndex))
+          if ((lons.noNulls || !lons.isNull(lonIndex)) && (tipe == "node"))
             lons.vector(lonIndex).getHiveDecimal.bigDecimalValue
           else null
 
         // nds
         val ndsIndex = if (ndss.isRepeating) 0; else i
         val nds: Array[Row] =
-          if (ndss.noNulls || !ndss.isNull(ndsIndex)) {
+          if ((ndss.noNulls || !ndss.isNull(ndsIndex)) && (tipe == "way")) {
             val offset = ndss.offsets(ndsIndex).toInt
             val length = ndss.lengths(ndsIndex).toInt
             Range(offset, offset+length).toArray.map({ j =>
@@ -148,17 +148,10 @@ object OrcBackend {
           }
           else Array.empty[Row]
 
-        // changeset
-        val changesetIndex = if (changesets.isRepeating) 0; else i
-        val changeset =
-          if (changesets.noNulls || !changesets.isNull(changesetIndex))
-            changesets.vector(changesetIndex)
-          else Long.MinValue
-
         // members
         val membersIndex = if (memberss.isRepeating) 0; else i
         val members: Array[Row] =
-          if (memberss.noNulls || !memberss.isNull(membersIndex)) {
+          if ((memberss.noNulls || !memberss.isNull(membersIndex)) && (tipe == "relation")) {
             val offset = memberss.offsets(membersIndex).toInt
             val length = memberss.lengths(membersIndex).toInt
             Range(offset, offset+length).toArray.map({ j =>
@@ -180,6 +173,13 @@ object OrcBackend {
             })
           }
           else Array.empty[Row]
+
+        // changeset
+        val changesetIndex = if (changesets.isRepeating) 0; else i
+        val changeset =
+          if (changesets.noNulls || !changesets.isNull(changesetIndex))
+            changesets.vector(changesetIndex)
+          else Long.MinValue
 
         // timestamp
         val timestampIndex = if (timestamps.isRepeating) 0; else i

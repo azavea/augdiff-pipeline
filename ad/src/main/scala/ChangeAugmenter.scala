@@ -140,9 +140,6 @@ class ChangeAugmenter(
     logger.info("complete")
 
     val rows_from_update = osm.toArray
-    // val osmDf = spark.createDataFrame(
-    //   spark.sparkContext.parallelize(rows_from_update, 1),
-    //   StructType(Common.osmSchema))
     val (newEdges, allEdges) = ComputeIndexLocal(rows_from_update, uri, props)
     val rows_from_everywhere =
       AugmentedDiff.augment(
@@ -163,7 +160,6 @@ class ChangeAugmenter(
 
     RowsToJson(fos, rows_from_update, rows_from_everywhere)
     PostgresBackend.saveIndex(newEdges, uri, props, "index")
-    // OrcBackend.save(osmDf, "osm", externalLocation, "append")
   }
 
   def close(): Unit = {}

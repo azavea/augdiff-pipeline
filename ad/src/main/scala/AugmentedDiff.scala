@@ -5,6 +5,7 @@ import org.apache.spark._
 import org.apache.spark.rdd._
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.StructType
 
 import org.apache.commons.io.FileUtils
 
@@ -211,6 +212,8 @@ object AugmentedDiffApp extends CommandApp(
       val conf = spark.sparkContext.hadoopConfiguration
       OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
 
+      var counter = 0
+      val saveInterval = 5
       stream.foreach({ i =>
         val ccc = AugmentedDiff.numberToStr(i % 1000)
         val bbb = AugmentedDiff.numberToStr((i / 1000) % 1000)
@@ -218,6 +221,16 @@ object AugmentedDiffApp extends CommandApp(
         val jsonfile = jsontemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         val oscfile = osctemplate.replace("AAA", aaa).replace("BBB", bbb).replace("CCC", ccc)
         AugmentedDiff.osc2json(conf, oscfile, jsonfile, uri, props, external)
+
+        counter=counter+1
+        if ((counter % saveInterval) == 0) { // periodic save
+          val df = spark.createDataFrame(
+            spark.sparkContext.parallelize(AugmentedDiff.rows_from_memory, 1),
+            StructType(Common.osmSchema))
+          OrcBackend.save(df, "osm", external, "append")
+          OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
+          AugmentedDiff.rows_from_memory.clear
+        }
       })
     })
   }

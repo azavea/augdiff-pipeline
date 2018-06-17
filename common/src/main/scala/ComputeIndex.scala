@@ -70,7 +70,7 @@ object ComputeIndex {
     halfEdgesFromNodes.union(halfEdgesFromRelations)
   }
 
-  def apply(rows: DataFrame, replicate: Boolean = false): DataFrame = {
+  def apply(rows: DataFrame): DataFrame = {
     logger.info(s"◻ Computing Index")
 
     val edgeDf = edgesFromRows(rows)
@@ -89,8 +89,7 @@ object ComputeIndex {
       })
 
     rows.sparkSession.createDataFrame(
-      if (!replicate) data.map({ case (a, b) => Row(a, b) })
-      else data.flatMap({ case (a, b) => List(Row(a, b), Row(b, a)) }),
+      data.map({ case (a, b) => Row(a, b) }),
       StructType(Common.lesserIndexSchema))
   }
 

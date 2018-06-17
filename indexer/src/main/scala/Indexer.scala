@@ -54,9 +54,8 @@ object Indexer extends CommandApp(
       val osm = spark.read.orc(orcfile)
       OrcBackend.saveOsm(osm, "osm", external + "osm/", "overwrite")
 
-      // val combIndex = ComputeIndex(osm, replicate = true)
-      // OrcBackend.saveIndex(combIndex, "comb_index", external + "index/", "overwrite")
-      val combIndex = ComputeIndex(osm, replicate = false)
+      val combIndex = ComputeIndex(osm)
+      OrcBackend.saveIndex(combIndex, "index", external + "index/", "overwrite")
       PostgresBackend.saveIndex(combIndex, uri, props, "index", "overwrite")
     })
   }

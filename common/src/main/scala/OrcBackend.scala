@@ -288,14 +288,20 @@ object OrcBackend {
     externalLocation: String,
     mode: String
   ): Unit = {
-    val options = Map(
+    val optionsA = Map(
       "orc.bloom.filter.columns" -> "a",
       "orc.create.index" -> "true",
       "orc.row.index.stride" -> "1024",
-      "path" -> externalLocation
+      "path" -> (externalLocation + "a/")
+    )
+    val optionsB = Map(
+      "orc.bloom.filter.columns" -> "b",
+      "orc.create.index" -> "true",
+      "orc.row.index.stride" -> "1024",
+      "path" -> (externalLocation + "b/")
     )
 
-    logger.info(s"Writing index as ORC files")
+    logger.info(s"Writing index A as ORC files")
     df
       .withColumn("p", Common.partitionNumberUdf2(col("a")))
       .select(Common.indexColumns: _*)
@@ -304,9 +310,22 @@ object OrcBackend {
       .write
       .mode(mode)
       .format("orc")
-      .options(options)
+      .options(optionsA)
       .partitionBy("p")
-      .saveAsTable(tableName)
+      .saveAsTable("a" + tableName)
+
+    logger.info(s"Writing index B as ORC files")
+    df
+      .withColumn("p", Common.partitionNumberUdf2(col("b")))
+      .select(Common.indexColumns: _*)
+      .repartition(col("p"))
+      .sortWithinPartitions(col("b"))
+      .write
+      .mode(mode)
+      .format("orc")
+      .options(optionsB)
+      .partitionBy("p")
+      .saveAsTable("b" + tableName)
   }
 
 }

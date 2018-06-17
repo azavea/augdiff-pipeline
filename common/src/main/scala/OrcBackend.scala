@@ -261,16 +261,46 @@ object OrcBackend {
     mode: String
   ): Unit = {
     val options = Map(
-      "orc.bloom.filter.columns" -> "id",
+      "orc.bloom.filter.columns" -> "idtype",
       "orc.create.index" -> "true",
-      "orc.row.index.stride" -> "1000",
+      "orc.row.index.stride" -> "1024",
       "path" -> externalLocation
     )
 
     logger.info(s"Writing OSM as ORC files")
     df
+      .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
+      .withColumn("idtype", Common.idTypeToLongUdf(col("id"), col("type")))
+      .select(Common.osmColumns: _*)
       .repartition(col("p"))
       .sortWithinPartitions(col("idtype"))
+      .write
+      .mode(mode)
+      .format("orc")
+      .options(options)
+      .partitionBy("p")
+      .saveAsTable(tableName)
+  }
+
+  def saveIndex(
+    df: DataFrame,
+    tableName: String,
+    externalLocation: String,
+    mode: String
+  ): Unit = {
+    val options = Map(
+      "orc.bloom.filter.columns" -> "a",
+      "orc.create.index" -> "true",
+      "orc.row.index.stride" -> "1024",
+      "path" -> externalLocation
+    )
+
+    logger.info(s"Writing index as ORC files")
+    df
+      .withColumn("p", Common.partitionNumberUdf2(col("a")))
+      .select(Common.indexColumns: _*)
+      .repartition(col("p"))
+      .sortWithinPartitions(col("a"))
       .write
       .mode(mode)
       .format("orc")

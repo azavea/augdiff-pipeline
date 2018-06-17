@@ -48,8 +48,7 @@ object AugmentedDiff {
     conf: Configuration,
     from_update: Array[Row],
     from_memory: Array[Row],
-    edges: Set[ComputeIndexLocal.Edge],
-    externalLocation: String
+    edges: Set[ComputeIndexLocal.Edge]
   ): Array[Row] = {
 
     val idtypes_from_updates = from_update.map({ row => row.getLong(14) }).toSet
@@ -166,7 +165,11 @@ object AugmentedDiffApp extends CommandApp(
       Opts.option[String]("external", help = "External location of OSM table")
 
     (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
-      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
+      (osctemplate, jsontemplate, range, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, _external) =>
+
+      val external =
+        if (_external.endsWith("/")) _external
+        else _external + "/"
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -184,7 +187,7 @@ object AugmentedDiffApp extends CommandApp(
       }
 
       val conf = spark.sparkContext.hadoopConfiguration
-      OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
+      OrcBackend.listFiles(conf, AugmentedDiff.paths, external + "osm/")
 
       var counter = 0
       val saveInterval = 5
@@ -201,8 +204,8 @@ object AugmentedDiffApp extends CommandApp(
           val df = spark.createDataFrame(
             spark.sparkContext.parallelize(AugmentedDiff.rows_from_memory, 1),
             StructType(Common.osmSchema))
-          OrcBackend.saveOsm(df, "osm", external, "append")
-          OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
+          OrcBackend.saveOsm(df, "osm", external + "osm/", "append")
+          OrcBackend.listFiles(conf, AugmentedDiff.paths, external + "osm/")
           AugmentedDiff.rows_from_memory.clear
         }
       })

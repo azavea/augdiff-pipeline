@@ -67,6 +67,7 @@ object Common {
   def partitionNumberFn(id: Long, tipe: String): Long =
     partitionNumberFn(idTypeToLongFn(id, tipe))
   val partitionNumberUdf = udf({ (id: Long, tipe: String) => partitionNumberFn(id, tipe) })
+  val partitionNumberUdf2 = udf({ (idtype: Long) => partitionNumberFn(idtype) })
 
   val larger = udf({ (x: Long, y: Long) => math.max(x,y) })
 
@@ -110,17 +111,17 @@ object Common {
     col("visible"),   /* 13 */
     col("idtype"))    /* 14 */
 
-  val edgeColumns: List[Column] = List(
+  val lesserIndexSchema = StructType(List(
+    StructField("a", LongType, false),
+    StructField("b", LongType, false)))
+  val lesserIndexColumns: List[Column] = List(
     col("a"), /* 0 */
     col("b")  /* 1 */
   )
-
-  val indexSchema = StructType(List(
-    StructField("a", LongType, false),
-    StructField("b", LongType, false)))
   val indexColumns: List[Column] = List(
-    col("a"), /* 0 */
-    col("b")  /* 1 */
+    col("p"), /* 0 */
+    col("a"), /* 1 */
+    col("b")  /* 2 */
   )
 
   private val logger = {

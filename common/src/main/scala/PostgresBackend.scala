@@ -24,7 +24,7 @@ object PostgresBackend {
   ): Unit = {
     logger.info(s"Writing index into ${uri}")
     index
-      .select(Common.indexColumns: _*)
+      .select(Common.lesserIndexColumns: _*)
       .write
       .mode(mode)
       .jdbc(uri, tableName, props)

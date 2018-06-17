@@ -36,7 +36,11 @@ object Indexer extends CommandApp(
       Opts.option[String]("external", help = "External location of OSM table")
 
     (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external).mapN({
-      (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, external) =>
+      (orcfile, postgresHost, postgresPort, postgresUser, postgresPassword, postgresDb, _external) =>
+
+      val external =
+        if (_external.endsWith("/")) _external
+        else _external + "/"
 
       val uri = s"jdbc:postgresql://${postgresHost}:${postgresPort}/${postgresDb}"
       val props = {
@@ -47,15 +51,13 @@ object Indexer extends CommandApp(
         ps
       }
 
-      val osm = spark
-        .read.orc(orcfile)
-        .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
-        .withColumn("idtype", Common.idTypeToLongUdf(col("id"), col("type")))
-        .select(Common.osmColumns: _*)
-      val index = ComputeIndex(osm)
+      val osm = spark.read.orc(orcfile)
+      OrcBackend.saveOsm(osm, "osm", external + "osm/", "overwrite")
 
-      PostgresBackend.saveIndex(index, uri, props, "index", "overwrite")
-      OrcBackend.saveOsm(osm, "osm", external, "overwrite")
+      // val combIndex = ComputeIndex(osm, replicate = true)
+      // OrcBackend.saveIndex(combIndex, "comb_index", external + "index/", "overwrite")
+      val combIndex = ComputeIndex(osm, replicate = false)
+      PostgresBackend.saveIndex(combIndex, uri, props, "index", "overwrite")
     })
   }
 )

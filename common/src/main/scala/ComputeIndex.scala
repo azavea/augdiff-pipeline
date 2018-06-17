@@ -55,7 +55,7 @@ object ComputeIndex {
         .select(
           Common.idTypeToLongUdf(col("nds.ref"), lit("node")).as("a"),
           col("b"))
-        .select(Common.edgeColumns: _*)
+        .select(Common.lesserIndexColumns: _*)
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
@@ -65,12 +65,12 @@ object ComputeIndex {
         .select(
           Common.idTypeToLongUdf(col("members.ref"), col("members.type")).as("a"),
           col("b"))
-        .select(Common.edgeColumns: _*)
+        .select(Common.lesserIndexColumns: _*)
 
     halfEdgesFromNodes.union(halfEdgesFromRelations)
   }
 
-  def apply(rows: DataFrame): DataFrame = {
+  def apply(rows: DataFrame, replicate: Boolean = false): DataFrame = {
     logger.info(s"◻ Computing Index")
 
     val edgeDf = edgesFromRows(rows)
@@ -89,8 +89,9 @@ object ComputeIndex {
       })
 
     rows.sparkSession.createDataFrame(
-      data.map({ case (a, b) => Row(a, b) }),
-      StructType(Common.indexSchema))
+      if (!replicate) data.map({ case (a, b) => Row(a, b) })
+      else data.flatMap({ case (a, b) => List(Row(a, b), Row(b, a)) }),
+      StructType(Common.lesserIndexSchema))
   }
 
 }

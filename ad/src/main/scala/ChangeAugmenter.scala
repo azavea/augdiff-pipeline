@@ -148,8 +148,7 @@ class ChangeAugmenter(
         conf,
         rows_from_update,
         rows_from_memory.toArray,
-        allEdges,
-        externalLocation)
+        allEdges)
     val fos =
       if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
         val path = new Path(jsonfile)

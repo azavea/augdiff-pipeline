@@ -50,6 +50,7 @@ object Indexer extends CommandApp(
       val osm = spark
         .read.orc(orcfile)
         .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
+        .withColumn("idtype", Common.idTypeToLongUdf(col("id"), col("type")))
         .select(Common.osmColumns: _*)
       val index = ComputeIndex(osm)
 

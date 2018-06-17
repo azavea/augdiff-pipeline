@@ -43,7 +43,7 @@ object OrcBackend {
   def loadOsmFile(
     path: Path,
     sarg: SearchArgument,
-    pairs: Set[(Long, String)],
+    idtypes: Set[Long],
     conf: Configuration
   ): Array[Row] = {
     val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
@@ -54,8 +54,8 @@ object OrcBackend {
 
     // https://orc.apache.org/docs/core-java.html
     while(rows.nextBatch(batch)) {
-      val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // id at 0 because p column dropped due to partitioned write
-      val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector]
+      // val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // id at 0 because p column dropped due to partitioned write
+      // val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector]
       val tagss = batch.cols(2).asInstanceOf[vector.MapColumnVector]
       val tagKeys = tagss.keys.asInstanceOf[vector.BytesColumnVector]
       val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
@@ -74,30 +74,20 @@ object OrcBackend {
       val users = batch.cols(10).asInstanceOf[vector.BytesColumnVector]
       val versions = batch.cols(11).asInstanceOf[vector.LongColumnVector]
       val visibles = batch.cols(12).asInstanceOf[vector.LongColumnVector]
+      val idtypesCol = batch.cols(13).asInstanceOf[vector.LongColumnVector]
 
       Range(0, batch.size).foreach({ i =>
 
-        // id
-        val idIndex = if (ids.isRepeating) 0; else i
-        val id: Long =
-          if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
+        // idtype, id, type, p
+        val idtypeIndex = if (idtypesCol.isRepeating) 0; else i
+        val idtype: Long =
+          if (idtypesCol.noNulls || !idtypesCol.isNull(idtypeIndex)) idtypesCol.vector(idtypeIndex)
           else Long.MinValue
+        val id = Common.longToIdFn(idtype)
+        val tipe = Common.longToTypeFn(idtype)
+        val p = Common.partitionNumberFn(idtype)
 
-        // type
-        val typeIndex = if (types.isRepeating) 0; else i
-        val tipe: String =
-          if (types.noNulls || !types.isNull(typeIndex)) {
-            val start = types.start(typeIndex)
-            val length = types.length(typeIndex)
-            types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
-          }
-          else null
-
-        // p, pair
-        val p = Common.partitionNumberFn(id, tipe)
-        val pair = (id, tipe)
-
-        if (pairs.contains(pair)) {
+        if (idtypes.contains(idtype)) {
 
           // tags
           val tagsIndex = if (tagss.isRepeating) 0; else i
@@ -220,7 +210,7 @@ object OrcBackend {
             }
             else false
 
-          val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+          val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, idtype)
           ab.append(row)
         }
       })
@@ -233,10 +223,9 @@ object OrcBackend {
   def loadOsm(
     conf: Configuration,
     paths: Array[Path],
-    keyedTriples: Map[Long, Set[(Long, Long, String)]],
-    pairs: Set[(Long, String)]
+    idtypes: Set[Long]
   ): Array[Row] = {
-    val partitions: Set[Long] = keyedTriples.keys.toSet
+    val partitions: Set[Long] = idtypes.map({ idtype => Common.partitionNumberFn(idtype) })
     val re = raw"p=(\d+)".r.unanchored
     val paths2 = paths
       .filter({ path =>
@@ -248,17 +237,17 @@ object OrcBackend {
 
     logger.info(s"Building SearchArgument")
     val sarg: SearchArgument = {
-      val longs = pairs.map({ pair => new java.lang.Long(pair._1) }).toArray
+      val longs = idtypes.map(new java.lang.Long(_)).toArray
       SearchArgumentFactory
         .newBuilder
         .startOr
-        .in("id", PredicateLeaf.Type.LONG, longs : _*)
+        .in("idtype", PredicateLeaf.Type.LONG, longs : _*)
         .end
         .build
     }
 
-    logger.info(s"Loading ${keyedTriples.size} partitions from ${paths2.size} files")
-    val rows = paths2.par.flatMap({ path => loadOsmFile(path, sarg, pairs, conf) }).toArray
+    logger.info(s"Loading ${idtypes.size} potential rows in ${partitions.size} partitions from ${paths2.size} files")
+    val rows = paths2.par.flatMap({ path => loadOsmFile(path, sarg, idtypes, conf) }).toArray
 
     logger.info(s"Got ${rows.size} rows from storage")
 
@@ -281,7 +270,7 @@ object OrcBackend {
     logger.info(s"Writing OSM as ORC files")
     df
       .repartition(col("p"))
-      .sortWithinPartitions(col("id"), col("type"))
+      .sortWithinPartitions(col("idtype"))
       .write
       .mode(mode)
       .format("orc")

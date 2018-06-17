@@ -36,11 +36,11 @@ object AugmentedDiff {
   val paths = mutable.ArrayBuffer.empty[Path]
   val rows_from_memory = mutable.ArrayBuffer.empty[Row]
 
-  // Given a set of update rows (`rows_from_update`), a set of rows
-  // from memory that haven't been flushed to storage yet
-  // (`rows_from_memory`), and a set of dependency arrows (`edges`
-  // [edge.a is an entity, edge.b is a dependency of that entity]),
-  // compute the complete set of rows needed to render the update.
+  // Given a set of update rows (`from_update`), a set of rows from
+  // memory that haven't been flushed to storage yet (`from_memory`),
+  // and a set of dependency arrows (`edges` [edge.a is an entity,
+  // edge.b is a dependency of that entity]), compute the complete set
+  // of rows needed to render the update.
   //
   // The set `edges` is passed-in because it has already been computed
   // as part of the index-updating process.
@@ -52,42 +52,16 @@ object AugmentedDiff {
     externalLocation: String
   ): Array[Row] = {
 
-    // (partition, id, type) triples from the update rows.
-    //
-    // This may look strange because the update rows are already in
-    // hand, but these do need to be loaded from storage in the case
-    // where something has been *modified* rather than just added.
-    val triples_from_updates =
-      from_update.map({ row =>
-        val id = row.getLong(1)
-        val tipe = row.getString(2)
-        val p = Common.partitionNumberFn(id, tipe)
-        (p, id, tipe)
-      }).toSet
+    val idtypes_from_updates = from_update.map({ row => row.getLong(14) }).toSet
+    val idtypes_from_deps = edges.flatMap({ edge => Set(edge.a, edge.b) }).toSet
+    val idtypes = idtypes_from_updates ++ idtypes_from_deps
 
-    // (partition, id, type) triples form the dependency rows
-    val triples_from_deps =
-      edges
-        .flatMap({ edge =>
-          val aId = Common.longToIdFn(edge.a)
-          val aType = Common.longToTypeFn(edge.a)
-          val ap = Common.partitionNumberFn(aId, aType)
-          val bId = Common.longToIdFn(edge.b)
-          val bType = Common.longToTypeFn(edge.b)
-          val bp = Common.partitionNumberFn(bId, bType)
-          List((ap, aId, aType), (bp, bId, bType))
-        }).toSet
-
-    val triples = triples_from_updates ++ triples_from_deps
-    val keyedTriples = triples.groupBy(_._1) // mapping from partition to list of triples
-    val pairs: Set[(Long, String)] = keyedTriples.values.flatMap({ s => s.map({ t => (t._2, t._3) }) }).toSet
     val from_memory2 = from_memory.filter({ row => // filter out uninteresting in-memory rows
-      val id = row.getLong(1)
-      val tipe = row.getString(2)
-      val pair = (id, tipe)
-      pairs.contains(pair)
+      val idtype = row.getLong(14)
+      idtypes.contains(idtype)
     })
-    val from_storage = OrcBackend.loadOsm(conf, paths.toArray, keyedTriples, pairs)
+
+    val from_storage = OrcBackend.loadOsm(conf, paths.toArray, idtypes)
 
     (from_update ++ from_memory2 ++ from_storage).distinct
   }

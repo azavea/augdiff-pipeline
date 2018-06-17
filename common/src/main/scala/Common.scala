@@ -32,16 +32,16 @@ object Common {
 
   private val bits = 12
 
-  def pairToLongFn(id: Long, tipe: String): Long = {
+  def idTypeToLongFn(id: Long, tipe: String): Long = {
     val typeBits = tipe match {
       case "node" => 0x0
-      case "way" => 0x1
-      case "relation" => 0x2
+      case "way" => 0x2
+      case "relation" => 0x3
       case _ => throw new Exception(s"pairToLongFn($id, $tipe)")
     }
     (id<<2) | typeBits
   }
-  val pairToLongUdf = udf({ (id: Long, tipe: String) => pairToLongFn(id, tipe) })
+  val idTypeToLongUdf = udf({ (id: Long, tipe: String) => idTypeToLongFn(id, tipe) })
 
   def longToIdFn(long: Long): Long = (long>>2)
   val longToIdUdf = udf({ (long: Long) => longToIdFn(long) })
@@ -49,26 +49,23 @@ object Common {
   def longToTypeFn(long: Long): String = {
     (long & 0x3) match {
       case 0 => "node"
-      case 1 => "way"
-      case 2 => "relation"
+      case 2 => "way"
+      case 3 => "relation"
       case _ => throw new Exception(s"longToTypeFn($long)")
     }
   }
   val longToTypeUdf = udf({ (long: Long) => longToTypeFn(long) })
 
-  def partitionNumberFn(id: Long, tipe: String): Long = {
-    var a = id
+  def partitionNumberFn(idtype: Long): Long = {
+    var a = idtype
     while (a > ((1L)<<(bits-1))) {
-      a = a/ 10
+      a = a/10
     }
-    val b = tipe match {
-      case "node" => 0L
-      case "way" => 1L
-      case "relation" => 2L
-      case _ => throw new Exception(s"partitionNumberFn($id, $tipe)")
-    }
-    a ^ b
+    val typebit = ((idtype>>1) & 0x01)
+    (a & ((-1)<<1)) | typebit
   }
+  def partitionNumberFn(id: Long, tipe: String): Long =
+    partitionNumberFn(idTypeToLongFn(id, tipe))
   val partitionNumberUdf = udf({ (id: Long, tipe: String) => partitionNumberFn(id, tipe) })
 
   val larger = udf({ (x: Long, y: Long) => math.max(x,y) })
@@ -94,7 +91,8 @@ object Common {
     StructField("uid", LongType, true),
     StructField("user", StringType, true),
     StructField("version", LongType, true),
-    StructField("visible", BooleanType, true)))
+    StructField("visible", BooleanType, true),
+    StructField("idtype", LongType, true)))
   val osmColumns: List[Column] = List(
     col("p"),         /* 0 */
     col("id"),        /* 1 */
@@ -109,7 +107,8 @@ object Common {
     col("uid"),       /* 10 */
     col("user"),      /* 11 */
     col("version"),   /* 12 */
-    col("visible"))   /* 13 */
+    col("visible"),   /* 13 */
+    col("idtype"))    /* 14 */
 
   val edgeColumns: List[Column] = List(
     col("a"), /* 0 */

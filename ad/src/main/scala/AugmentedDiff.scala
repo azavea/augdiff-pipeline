@@ -87,7 +87,7 @@ object AugmentedDiff {
       val pair = (id, tipe)
       pairs.contains(pair)
     })
-    val from_storage = OrcBackend.load(conf, paths.toArray, keyedTriples, pairs)
+    val from_storage = OrcBackend.loadOsm(conf, paths.toArray, keyedTriples, pairs)
 
     (from_update ++ from_memory2 ++ from_storage).distinct
   }
@@ -227,7 +227,7 @@ object AugmentedDiffApp extends CommandApp(
           val df = spark.createDataFrame(
             spark.sparkContext.parallelize(AugmentedDiff.rows_from_memory, 1),
             StructType(Common.osmSchema))
-          OrcBackend.save(df, "osm", external, "append")
+          OrcBackend.saveOsm(df, "osm", external, "append")
           OrcBackend.listFiles(conf, AugmentedDiff.paths, external)
           AugmentedDiff.rows_from_memory.clear
         }

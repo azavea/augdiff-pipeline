@@ -40,7 +40,7 @@ object OrcBackend {
     }
   }
 
-  def loadFile(
+  def loadOsmFile(
     path: Path,
     sarg: SearchArgument,
     pairs: Set[(Long, String)],
@@ -230,7 +230,7 @@ object OrcBackend {
     ab.toArray
   }
 
-  def load(
+  def loadOsm(
     conf: Configuration,
     paths: Array[Path],
     keyedTriples: Map[Long, Set[(Long, Long, String)]],
@@ -258,14 +258,14 @@ object OrcBackend {
     }
 
     logger.info(s"Loading ${keyedTriples.size} partitions from ${paths2.size} files")
-    val rows = paths2.par.flatMap({ path => loadFile(path, sarg, pairs, conf) }).toArray
+    val rows = paths2.par.flatMap({ path => loadOsmFile(path, sarg, pairs, conf) }).toArray
 
     logger.info(s"Got ${rows.size} rows from storage")
 
     rows
   }
 
-  def save(
+  def saveOsm(
     df: DataFrame,
     tableName: String,
     externalLocation: String,

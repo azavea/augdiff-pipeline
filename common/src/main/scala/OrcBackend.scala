@@ -22,6 +22,8 @@ object OrcBackend {
     logger
   }
 
+  // ************************************************************************
+
   def listFiles(
     conf: Configuration,
     paths: mutable.ArrayBuffer[Path],
@@ -40,6 +42,8 @@ object OrcBackend {
     }
   }
 
+  // ************************************************************************
+
   def loadOsmFile(
     path: Path,
     sarg: SearchArgument,
@@ -54,8 +58,6 @@ object OrcBackend {
 
     // https://orc.apache.org/docs/core-java.html
     while(rows.nextBatch(batch)) {
-      // val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // id at 0 because p column dropped due to partitioned write
-      // val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector]
       val tagss = batch.cols(2).asInstanceOf[vector.MapColumnVector]
       val tagKeys = tagss.keys.asInstanceOf[vector.BytesColumnVector]
       val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
@@ -280,6 +282,96 @@ object OrcBackend {
       .options(options)
       .partitionBy("p")
       .saveAsTable(tableName)
+  }
+
+  // ************************************************************************
+
+  def loadIndexFile(
+    path: Path,
+    sarg: SearchArgument,
+    sourceSet: Set[Long],
+    conf: Configuration,
+    aIndex: Boolean
+  ): Array[Row] = {
+    val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
+    val schema = reader.getSchema
+    val column: String = if (aIndex) "a"; else "b"
+    val rows = reader.rows(reader.options.schema(schema).searchArgument(sarg, Array(null, column)))
+    val batch = schema.createRowBatch
+    val ab = mutable.ArrayBuffer.empty[Row]
+
+    while(rows.nextBatch(batch)) {
+      val sources =
+        if (aIndex) batch.cols(0).asInstanceOf[vector.LongColumnVector] // a column
+        else batch.cols(1).asInstanceOf[vector.LongColumnVector] // b column
+      val dests =
+        if (aIndex) batch.cols(1).asInstanceOf[vector.LongColumnVector] // b column
+        else batch.cols(0).asInstanceOf[vector.LongColumnVector] // a column
+
+      Range(0, batch.size).foreach({ i =>
+        val sourceIndex = if (sources.isRepeating) 0; else i
+        val source: Long =
+          if (sources.noNulls || !sources.isNull(sourceIndex)) sources.vector(sourceIndex)
+          else Long.MinValue
+
+        if (sourceSet.contains(source)) {
+          val destIndex = if (dests.isRepeating) 0; else i
+          val dest: Long =
+            if (dests.noNulls || !dests.isNull(destIndex)) dests.vector(destIndex)
+            else Long.MinValue
+
+          val row = if (aIndex) Row(source, dest); else Row(dest, source)
+          ab.append(row)
+        }
+      })
+    }
+
+    rows.close
+    ab.toArray
+  }
+
+  def loadIndex(
+    conf: Configuration,
+    paths: Array[Path],
+    idtypes: Set[Long],
+    aIndex: Boolean
+  ): Array[Row] = {
+    val partitions: Set[Long] = idtypes.map({ idtype => Common.partitionNumberFn(idtype) })
+    val re = raw"p=(\d+)".r.unanchored
+    val paths2 = paths
+      .filter({ path =>
+        path.toString match {
+          case re(partition) => if (partitions.contains(partition.toLong)) true; else false
+          case _ => false
+        }
+      })
+
+    logger.info(s"Building SearchArgument")
+    val sarg: SearchArgument = if (aIndex) {
+      val longs = idtypes.map(new java.lang.Long(_)).toArray
+      SearchArgumentFactory
+        .newBuilder
+        .startOr
+        .in("a", PredicateLeaf.Type.LONG, longs : _*)
+        .end
+        .build
+    }
+    else {
+      val longs = idtypes.map(new java.lang.Long(_)).toArray
+      SearchArgumentFactory
+        .newBuilder
+        .startOr
+        .in("a", PredicateLeaf.Type.LONG, longs : _*)
+        .end
+        .build
+    }
+
+    logger.info(s"Loading ${idtypes.size} potential rows in ${partitions.size} partitions from ${paths2.size} files")
+    val rows = paths2.par.flatMap({ path => loadIndexFile(path, sarg, idtypes, conf, aIndex) }).toArray
+
+    logger.info(s"Got ${rows.size} rows from storage")
+
+    rows
   }
 
   def saveIndex(

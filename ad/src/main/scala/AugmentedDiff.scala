@@ -34,6 +34,8 @@ object AugmentedDiff {
 
   // state
   val paths = mutable.ArrayBuffer.empty[Path]
+  val indexPathsA = mutable.ArrayBuffer.empty[Path]
+  val indexPathsB = mutable.ArrayBuffer.empty[Path]
   val rows_from_memory = mutable.ArrayBuffer.empty[Row]
 
   // Given a set of update rows (`from_update`), a set of rows from
@@ -188,6 +190,8 @@ object AugmentedDiffApp extends CommandApp(
 
       val conf = spark.sparkContext.hadoopConfiguration
       OrcBackend.listFiles(conf, AugmentedDiff.paths, external + "osm/")
+      OrcBackend.listFiles(conf, AugmentedDiff.indexPathsA, external + "osm/" + "a/")
+      OrcBackend.listFiles(conf, AugmentedDiff.indexPathsB, external + "osm/" + "b/")
 
       var counter = 0
       val saveInterval = 5

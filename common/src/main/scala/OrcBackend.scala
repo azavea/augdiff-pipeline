@@ -295,18 +295,16 @@ object OrcBackend {
   ): Array[Row] = {
     val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
     val schema = reader.getSchema
-    val column: String = if (aIndex) "a"; else "b"
-    val rows = reader.rows(reader.options.schema(schema).searchArgument(sarg, Array(null, column)))
+    val sourceColumn: String = if (aIndex) "a"; else "b"
+    val sourceColIndex: Int = if (aIndex) 0; else 1
+    val destColIndex: Int = if (aIndex) 1; else 0
+    val rows = reader.rows(reader.options.schema(schema).searchArgument(sarg, Array(null, sourceColumn)))
     val batch = schema.createRowBatch
     val ab = mutable.ArrayBuffer.empty[Row]
 
     while(rows.nextBatch(batch)) {
-      val sources =
-        if (aIndex) batch.cols(0).asInstanceOf[vector.LongColumnVector] // a column
-        else batch.cols(1).asInstanceOf[vector.LongColumnVector] // b column
-      val dests =
-        if (aIndex) batch.cols(1).asInstanceOf[vector.LongColumnVector] // b column
-        else batch.cols(0).asInstanceOf[vector.LongColumnVector] // a column
+      val sources = batch.cols(sourceColIndex).asInstanceOf[vector.LongColumnVector] // a column
+      val dests = batch.cols(destColIndex).asInstanceOf[vector.LongColumnVector] // b column
 
       Range(0, batch.size).foreach({ i =>
         val sourceIndex = if (sources.isRepeating) 0; else i
@@ -320,7 +318,7 @@ object OrcBackend {
             if (dests.noNulls || !dests.isNull(destIndex)) dests.vector(destIndex)
             else Long.MinValue
 
-          val row = if (aIndex) Row(source, dest); else Row(dest, source)
+          val row = Row(source, dest)
           ab.append(row)
         }
       })

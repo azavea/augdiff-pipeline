@@ -44,8 +44,9 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    val p = Common.partitionNumberFn(id, tipe)
-    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    val idtype = Common.idTypeToLongFn(id, tipe)
+    val p = Common.partitionNumberFn(idtype)
+    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, idtype)
 
     row
   }
@@ -96,8 +97,9 @@ object ChangeAugmenter {
       case _ => throw new Exception
     }
 
-    val p = Common.partitionNumberFn(id, tipe)
-    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+    val idtype = Common.idTypeToLongFn(id, tipe)
+    val p = Common.partitionNumberFn(idtype)
+    val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, idtype)
 
     row
   }
@@ -146,8 +148,7 @@ class ChangeAugmenter(
         conf,
         rows_from_update,
         rows_from_memory.toArray,
-        allEdges,
-        externalLocation)
+        allEdges)
     val fos =
       if (jsonfile.startsWith("hdfs:") || jsonfile.startsWith("s3a:") || jsonfile.startsWith("file:")) {
         val path = new Path(jsonfile)

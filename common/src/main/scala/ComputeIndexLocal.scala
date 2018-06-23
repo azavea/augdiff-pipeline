@@ -21,7 +21,7 @@ object ComputeIndexLocal {
     rows.flatMap({ r =>
       val bId = r.getLong(1)      /* id */
       val bType = r.getString(2)  /* type */
-      val b = Common.pairToLongFn(bId, bType)
+      val b = Common.idTypeToLongFn(bId, bType)
 
       bType match {
         case "node" =>
@@ -31,7 +31,7 @@ object ComputeIndexLocal {
           nds.flatMap({ nd =>
             val aId = nd.getLong(0)
             val aType = "node"
-            val a = Common.pairToLongFn(aId, aType)
+            val a = Common.idTypeToLongFn(aId, aType)
             Array[Edge](Edge(a = a, b = b))
           })
         case "relation" =>
@@ -39,7 +39,7 @@ object ComputeIndexLocal {
           members.flatMap({ member =>
             val aId = member.getLong(1)     /* members.ref */
             val aType = member.getString(0) /* members.type */
-            val a = Common.pairToLongFn(aId, aType)
+            val a = Common.idTypeToLongFn(aId, aType)
             Array[Edge](Edge(a = a, b = b))
           })
       }

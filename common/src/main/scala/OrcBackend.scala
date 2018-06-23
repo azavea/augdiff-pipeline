@@ -22,6 +22,8 @@ object OrcBackend {
     logger
   }
 
+  // ************************************************************************
+
   def listFiles(
     conf: Configuration,
     paths: mutable.ArrayBuffer[Path],
@@ -40,10 +42,12 @@ object OrcBackend {
     }
   }
 
-  def loadFile(
+  // ************************************************************************
+
+  def loadOsmFile(
     path: Path,
     sarg: SearchArgument,
-    pairs: Set[(Long, String)],
+    idtypes: Set[Long],
     conf: Configuration
   ): Array[Row] = {
     val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
@@ -54,8 +58,6 @@ object OrcBackend {
 
     // https://orc.apache.org/docs/core-java.html
     while(rows.nextBatch(batch)) {
-      val ids = batch.cols(0).asInstanceOf[vector.LongColumnVector] // id at 0 because p column dropped due to partitioned write
-      val types = batch.cols(1).asInstanceOf[vector.BytesColumnVector]
       val tagss = batch.cols(2).asInstanceOf[vector.MapColumnVector]
       val tagKeys = tagss.keys.asInstanceOf[vector.BytesColumnVector]
       val tagValues = tagss.values.asInstanceOf[vector.BytesColumnVector]
@@ -74,30 +76,20 @@ object OrcBackend {
       val users = batch.cols(10).asInstanceOf[vector.BytesColumnVector]
       val versions = batch.cols(11).asInstanceOf[vector.LongColumnVector]
       val visibles = batch.cols(12).asInstanceOf[vector.LongColumnVector]
+      val idtypesCol = batch.cols(13).asInstanceOf[vector.LongColumnVector]
 
       Range(0, batch.size).foreach({ i =>
 
-        // id
-        val idIndex = if (ids.isRepeating) 0; else i
-        val id: Long =
-          if (ids.noNulls || !ids.isNull(idIndex)) ids.vector(idIndex)
+        // idtype, id, type, p
+        val idtypeIndex = if (idtypesCol.isRepeating) 0; else i
+        val idtype: Long =
+          if (idtypesCol.noNulls || !idtypesCol.isNull(idtypeIndex)) idtypesCol.vector(idtypeIndex)
           else Long.MinValue
+        val id = Common.longToIdFn(idtype)
+        val tipe = Common.longToTypeFn(idtype)
+        val p = Common.partitionNumberFn(idtype)
 
-        // type
-        val typeIndex = if (types.isRepeating) 0; else i
-        val tipe: String =
-          if (types.noNulls || !types.isNull(typeIndex)) {
-            val start = types.start(typeIndex)
-            val length = types.length(typeIndex)
-            types.vector(typeIndex).drop(start).take(length).map(_.toChar).mkString
-          }
-          else null
-
-        // p, pair
-        val p = Common.partitionNumberFn(id, tipe)
-        val pair = (id, tipe)
-
-        if (pairs.contains(pair)) {
+        if (idtypes.contains(idtype)) {
 
           // tags
           val tagsIndex = if (tagss.isRepeating) 0; else i
@@ -220,7 +212,7 @@ object OrcBackend {
             }
             else false
 
-          val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible)
+          val row = Row(p, id, tipe, tags, lat, lon, nds, members, changeset, timestamp, uid, user, version, visible, idtype)
           ab.append(row)
         }
       })
@@ -230,13 +222,12 @@ object OrcBackend {
     ab.toArray
   }
 
-  def load(
+  def loadOsm(
     conf: Configuration,
     paths: Array[Path],
-    keyedTriples: Map[Long, Set[(Long, Long, String)]],
-    pairs: Set[(Long, String)]
+    idtypes: Set[Long]
   ): Array[Row] = {
-    val partitions: Set[Long] = keyedTriples.keys.toSet
+    val partitions: Set[Long] = idtypes.map({ idtype => Common.partitionNumberFn(idtype) })
     val re = raw"p=(\d+)".r.unanchored
     val paths2 = paths
       .filter({ path =>
@@ -248,46 +239,183 @@ object OrcBackend {
 
     logger.info(s"Building SearchArgument")
     val sarg: SearchArgument = {
-      val longs = pairs.map({ pair => new java.lang.Long(pair._1) }).toArray
+      val longs = idtypes.map(new java.lang.Long(_)).toArray
       SearchArgumentFactory
         .newBuilder
         .startOr
-        .in("id", PredicateLeaf.Type.LONG, longs : _*)
+        .in("idtype", PredicateLeaf.Type.LONG, longs : _*)
         .end
         .build
     }
 
-    logger.info(s"Loading ${keyedTriples.size} partitions from ${paths2.size} files")
-    val rows = paths2.par.flatMap({ path => loadFile(path, sarg, pairs, conf) }).toArray
+    logger.info(s"Loading ${idtypes.size} potential rows in ${partitions.size} partitions from ${paths2.size} files")
+    val rows = paths2.par.flatMap({ path => loadOsmFile(path, sarg, idtypes, conf) }).toArray
 
     logger.info(s"Got ${rows.size} rows from storage")
 
     rows
   }
 
-  def save(
+  def saveOsm(
     df: DataFrame,
     tableName: String,
     externalLocation: String,
     mode: String
   ): Unit = {
     val options = Map(
-      "orc.bloom.filter.columns" -> "id",
+      "orc.bloom.filter.columns" -> "idtype",
       "orc.create.index" -> "true",
-      "orc.row.index.stride" -> "1000",
+      "orc.row.index.stride" -> "1024",
       "path" -> externalLocation
     )
 
     logger.info(s"Writing OSM as ORC files")
     df
+      .withColumn("p", Common.partitionNumberUdf(col("id"), col("type")))
+      .withColumn("idtype", Common.idTypeToLongUdf(col("id"), col("type")))
+      .select(Common.osmColumns: _*)
       .repartition(col("p"))
-      .sortWithinPartitions(col("id"), col("type"))
+      .sortWithinPartitions(col("idtype"))
       .write
       .mode(mode)
       .format("orc")
       .options(options)
       .partitionBy("p")
       .saveAsTable(tableName)
+  }
+
+  // ************************************************************************
+
+  def loadIndexFile(
+    path: Path,
+    sarg: SearchArgument,
+    sourceSet: Set[Long],
+    conf: Configuration,
+    aIndex: Boolean
+  ): Array[Row] = {
+    val reader = orc.OrcFile.createReader(path, orc.OrcFile.readerOptions(conf))
+    val schema = reader.getSchema
+    val sourceColumn: String = if (aIndex) "a"; else "b"
+    val sourceColIndex: Int = if (aIndex) 0; else 1
+    val destColIndex: Int = if (aIndex) 1; else 0
+    val rows = reader.rows(reader.options.schema(schema).searchArgument(sarg, Array(null, sourceColumn)))
+    val batch = schema.createRowBatch
+    val ab = mutable.ArrayBuffer.empty[Row]
+
+    while(rows.nextBatch(batch)) {
+      val sources = batch.cols(sourceColIndex).asInstanceOf[vector.LongColumnVector] // a column
+      val dests = batch.cols(destColIndex).asInstanceOf[vector.LongColumnVector] // b column
+
+      Range(0, batch.size).foreach({ i =>
+        val sourceIndex = if (sources.isRepeating) 0; else i
+        val source: Long =
+          if (sources.noNulls || !sources.isNull(sourceIndex)) sources.vector(sourceIndex)
+          else Long.MinValue
+
+        if (sourceSet.contains(source)) {
+          val destIndex = if (dests.isRepeating) 0; else i
+          val dest: Long =
+            if (dests.noNulls || !dests.isNull(destIndex)) dests.vector(destIndex)
+            else Long.MinValue
+
+          val row = Row(source, dest)
+          ab.append(row)
+        }
+      })
+    }
+
+    rows.close
+    ab.toArray
+  }
+
+  def loadIndex(
+    conf: Configuration,
+    paths: Array[Path],
+    idtypes: Set[Long],
+    aIndex: Boolean
+  ): Array[Row] = {
+    val partitions: Set[Long] = idtypes.map({ idtype => Common.partitionNumberFn(idtype) })
+    val re = raw"p=(\d+)".r.unanchored
+    val paths2 = paths
+      .filter({ path =>
+        path.toString match {
+          case re(partition) => if (partitions.contains(partition.toLong)) true; else false
+          case _ => false
+        }
+      })
+
+    logger.info(s"Building SearchArgument")
+    val sarg: SearchArgument = if (aIndex) {
+      val longs = idtypes.map(new java.lang.Long(_)).toArray
+      SearchArgumentFactory
+        .newBuilder
+        .startOr
+        .in("a", PredicateLeaf.Type.LONG, longs : _*)
+        .end
+        .build
+    }
+    else {
+      val longs = idtypes.map(new java.lang.Long(_)).toArray
+      SearchArgumentFactory
+        .newBuilder
+        .startOr
+        .in("a", PredicateLeaf.Type.LONG, longs : _*)
+        .end
+        .build
+    }
+
+    logger.info(s"Loading ${idtypes.size} potential rows in ${partitions.size} partitions from ${paths2.size} files")
+    val rows = paths2.par.flatMap({ path => loadIndexFile(path, sarg, idtypes, conf, aIndex) }).toArray
+
+    logger.info(s"Got ${rows.size} rows from storage")
+
+    rows
+  }
+
+  def saveIndex(
+    df: DataFrame,
+    tableName: String,
+    externalLocation: String,
+    mode: String
+  ): Unit = {
+    val optionsA = Map(
+      "orc.bloom.filter.columns" -> "a",
+      "orc.create.index" -> "true",
+      "orc.row.index.stride" -> "1024",
+      "path" -> (externalLocation + "a/")
+    )
+    val optionsB = Map(
+      "orc.bloom.filter.columns" -> "b",
+      "orc.create.index" -> "true",
+      "orc.row.index.stride" -> "1024",
+      "path" -> (externalLocation + "b/")
+    )
+
+    logger.info(s"Writing index A as ORC files")
+    df
+      .withColumn("p", Common.partitionNumberUdf2(col("a")))
+      .select(Common.indexColumns: _*)
+      .repartition(col("p"))
+      .sortWithinPartitions(col("a"))
+      .write
+      .mode(mode)
+      .format("orc")
+      .options(optionsA)
+      .partitionBy("p")
+      .saveAsTable("a" + tableName)
+
+    logger.info(s"Writing index B as ORC files")
+    df
+      .withColumn("p", Common.partitionNumberUdf2(col("b")))
+      .select(Common.indexColumns: _*)
+      .repartition(col("p"))
+      .sortWithinPartitions(col("b"))
+      .write
+      .mode(mode)
+      .format("orc")
+      .options(optionsB)
+      .partitionBy("p")
+      .saveAsTable("b" + tableName)
   }
 
 }

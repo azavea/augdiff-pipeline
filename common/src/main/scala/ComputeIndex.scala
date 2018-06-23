@@ -50,22 +50,22 @@ object ComputeIndex {
       rows
         .filter(col("type") === "way")
         .select(
-          Common.pairToLongUdf(col("id"), col("type")).as("b"),
+          Common.idTypeToLongUdf(col("id"), col("type")).as("b"),
           explode(col("nds")).as("nds"))
         .select(
-          Common.pairToLongUdf(col("nds.ref"), lit("node")).as("a"),
+          Common.idTypeToLongUdf(col("nds.ref"), lit("node")).as("a"),
           col("b"))
-        .select(Common.edgeColumns: _*)
+        .select(Common.lesserIndexColumns: _*)
     val halfEdgesFromRelations =
       rows
         .filter(col("type") === "relation")
         .select(
-          Common.pairToLongUdf(col("id"), col("type")).as("b"),
+          Common.idTypeToLongUdf(col("id"), col("type")).as("b"),
           explode(col("members")).as("members"))
         .select(
-          Common.pairToLongUdf(col("members.ref"), col("members.type")).as("a"),
+          Common.idTypeToLongUdf(col("members.ref"), col("members.type")).as("a"),
           col("b"))
-        .select(Common.edgeColumns: _*)
+        .select(Common.lesserIndexColumns: _*)
 
     halfEdgesFromNodes.union(halfEdgesFromRelations)
   }
@@ -90,7 +90,7 @@ object ComputeIndex {
 
     rows.sparkSession.createDataFrame(
       data.map({ case (a, b) => Row(a, b) }),
-      StructType(Common.indexSchema))
+      StructType(Common.lesserIndexSchema))
   }
 
 }

@@ -4,11 +4,15 @@ require("babel-polyfill");
 
 const fs = require("fs");
 const path = require("path");
-const { Transform, Writable } = require("stream");
+const { Transform } = require("stream");
 const url = require("url");
+const { promisify } = require("util");
 
 const _ = require("highland");
 const AWS = require("aws-sdk");
+const YAML = require("yaml").default
+
+const writeFileAsync = promisify(fs.writeFile);
 
 const {
   parsers: { AugmentedDiffParser },
@@ -66,30 +70,55 @@ class ExtractionStream extends Transform {
 };
 
 const writer = targetURI =>
-  ([sequence, batch], callback) => {
+  async ([sequence, batch], callback) => {
     console.log(`${sequence} (${sequenceToTimestamp(sequence).toISOString()}): ${batch.length}`);
 
     const uri = url.parse(targetURI);
     const body = batch
       .map(x => `${JSON.stringify(x)}\n`)
       .join("");
+    const state = YAML.stringify({
+      last_run: new Date().toISOString(),
+      sequence
+    })
 
     switch (uri.protocol) {
       case "s3:":
-        return S3.putObject({
-          Body: body,
-          Bucket: uri.host,
-          Key: uri.path.slice(1) + `${sequence}.json`
-        }, callback);
+        try {
+          await S3.putObject({
+            Body: body,
+            Bucket: uri.host,
+            Key: uri.path.slice(1) + `${sequence}.json`
+          }).promise();
+
+          await S3.putObject({
+            Body: state,
+            Bucket: uri.host,
+            Key: uri.path.slice(1) + "state.yaml"
+          }).promise();
+        } catch (err) {
+          return callback(err);
+        }
+
+        return callback();
 
       case "file:":
         const prefix = uri.host + uri.path;
-        return fs
-          .writeFile(path.resolve(prefix, `${sequence}.json`), body, callback);
+
+        try {
+          await writeFileAsync(path.resolve(prefix, `${sequence}.json`), body);
+
+          await writeFileAsync(path.resolve(prefix, "state.yaml"), state);
+        } catch (err) {
+          return callback(err);
+        }
+
+        return callback();
+
+      default:
+        return callback(new Error(`Unsupported protocol: ${uri.protocol}`));
     }
   }
-
-const checkpoint = sequenceNumber => console.warn(`${sequenceNumber} fetched.`);
 
 const processor = new AugmentedDiffParser()
   .on("error", console.warn);

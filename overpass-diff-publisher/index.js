@@ -156,7 +156,7 @@ _(
 
       if (x.type === "Marker") {
         if (x.properties.status === "start") {
-          sequence = x.properties.sequenceNumber;
+          sequence = Number(x.properties.sequenceNumber);
         }
 
         if (x.properties.status === "end") {
